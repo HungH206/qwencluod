@@ -1,2 +1,5 @@
 bepflowaidesign/node_modules/
 bepflowaidesign/dist/
+bepflowaidesign/.env
+bepflowaidesign/.env.*
+!bepflowaidesign/.env.example

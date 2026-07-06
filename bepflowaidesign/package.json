@@ -1,9 +1,10 @@
 {
-  "name": "@figma/my-make-file",
+  "name": "bepflowai",
   "private": true,
   "version": "0.0.1",
   "type": "module",
   "scripts": {
+    "api": "node server.mjs",
     "build": "vite build",
     "dev": "vite"
   },
