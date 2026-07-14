@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   Brain,
+  BookOpen,
   CalendarClock,
   Check,
   ChefHat,
@@ -24,7 +25,29 @@ import {
   X,
 } from "lucide-react";
 
-type Tab = "restaurants" | "recipes" | "chat";
+type Tab = "restaurants" | "recipes" | "chat" | "library";
+
+type SavedRecipe = {
+  id: string;
+  name: string;
+  author: string;
+  ingredients: string;
+  instructions: string;
+  link: string;
+  tags: string[];
+  source: "Manual" | "Link" | "Import";
+  savedAt: string;
+};
+
+type SavedRecipeForm = {
+  name: string;
+  author: string;
+  ingredients: string;
+  instructions: string;
+  link: string;
+  tags: string;
+};
+
 type Mode = "restaurant" | "cook" | "prep";
 type UserLocation = { lat: number; lng: number };
 
@@ -185,6 +208,23 @@ function loadMemory() {
   } catch {
     return memorySeed;
   }
+}
+
+function loadSavedRecipes() {
+  try {
+    const raw = window.localStorage.getItem("bepflowai-saved-recipes");
+    return raw ? (JSON.parse(raw) as SavedRecipe[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function createSavedRecipe(data: Omit<SavedRecipe, "id" | "savedAt">): SavedRecipe {
+  return {
+    ...data,
+    id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `recipe-${Date.now()}`,
+    savedAt: new Date().toISOString(),
+  };
 }
 
 function inferContext(text: string) {
@@ -477,6 +517,16 @@ function ScoreBar({ label, value, active }: { label: string; value: number; acti
 function App() {
   const [tab, setTab] = useState<Tab>("chat");
   const [memory, setMemory] = useState<Memory>(() => loadMemory());
+  const [savedRecipes, setSavedRecipes] = useState<SavedRecipe[]>(() => loadSavedRecipes());
+  const [libraryMode, setLibraryMode] = useState<"manual" | "link">("manual");
+  const [libraryForm, setLibraryForm] = useState<SavedRecipeForm>({
+    name: "",
+    author: "bepgraph Demo",
+    ingredients: "",
+    instructions: "",
+    link: "",
+    tags: "",
+  });
   const [prompt, setPrompt] = useState(prompts[0]);
   const [submitted, setSubmitted] = useState(prompts[0]);
   const [restaurants, setRestaurants] = useState<Restaurant[]>(demoRestaurants);
@@ -498,6 +548,10 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem("bepflowai-memory", JSON.stringify(memory));
   }, [memory]);
+
+  useEffect(() => {
+    window.localStorage.setItem("bepflowai-saved-recipes", JSON.stringify(savedRecipes));
+  }, [savedRecipes]);
 
   useEffect(() => {
     void loadRecipes("chicken");
@@ -551,6 +605,44 @@ function App() {
       },
       { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 },
     );
+  }
+
+  function handleLibrarySave() {
+    if (!libraryForm.name.trim()) return;
+
+    const nextRecipe = createSavedRecipe({
+      name: libraryForm.name.trim(),
+      author: libraryForm.author.trim() || "bepgraph Demo",
+      ingredients: libraryForm.ingredients.trim(),
+      instructions: libraryForm.instructions.trim(),
+      link: libraryForm.link.trim(),
+      tags: libraryForm.tags
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+      source: libraryMode === "link" ? "Link" : "Manual",
+    });
+
+    setSavedRecipes((current) => [nextRecipe, ...current]);
+    setLibraryForm({ name: "", author: "bepgraph Demo", ingredients: "", instructions: "", link: "", tags: "" });
+    setLibraryMode("manual");
+  }
+
+  function handleSaveRecipe(recipe: Recipe) {
+    const alreadySaved = savedRecipes.some((item) => item.name === recipe.name && item.source === "Import");
+    if (alreadySaved) return;
+
+    const nextRecipe = createSavedRecipe({
+      name: recipe.name,
+      author: "bepgraph Demo",
+      ingredients: `Cuisine: ${recipe.cuisine}`,
+      instructions: recipe.instructions,
+      link: "",
+      tags: [recipe.cuisine],
+      source: "Import",
+    });
+
+    setSavedRecipes((current) => [nextRecipe, ...current]);
   }
 
   async function runOrchestrator(nextPrompt = prompt) {
@@ -630,6 +722,7 @@ function App() {
               {[
                 { id: "restaurants", label: "Restaurants", icon: Store },
                 { id: "recipes", label: "Recipes", icon: ChefHat },
+                { id: "library", label: "Library", icon: BookOpen },
                 { id: "chat", label: "Chat with Agents", icon: MessageSquareText },
               ].map((item) => {
                 const Icon = item.icon;
@@ -663,7 +756,18 @@ function App() {
               />
             )}
             {tab === "recipes" && (
-              <RecipesTab recipes={recipes} query={recipeQuery} loading={loadingRecipes} onQuery={setRecipeQuery} onSearch={loadRecipes} />
+              <RecipesTab recipes={recipes} query={recipeQuery} loading={loadingRecipes} onQuery={setRecipeQuery} onSearch={loadRecipes} onSaveRecipe={handleSaveRecipe} />
+            )}
+            {tab === "library" && (
+              <LibraryTab
+                savedRecipes={savedRecipes}
+                mode={libraryMode}
+                form={libraryForm}
+                onModeChange={setLibraryMode}
+                onFormChange={(field, value) => setLibraryForm((current) => ({ ...current, [field]: value }))}
+                onSave={() => handleLibrarySave()}
+                onRemove={(id) => setSavedRecipes((current) => current.filter((item) => item.id !== id))}
+              />
             )}
             {tab === "chat" && (
               <ChatTab
@@ -988,12 +1092,14 @@ function RecipesTab({
   loading,
   onQuery,
   onSearch,
+  onSaveRecipe,
 }: {
   recipes: Recipe[];
   query: string;
   loading: boolean;
   onQuery: (value: string) => void;
   onSearch: (value?: string) => void;
+  onSaveRecipe: (recipe: Recipe) => void;
 }) {
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
 
@@ -1059,12 +1165,14 @@ function RecipesTab({
           ))}
         </div>
       </section>
-      {selectedRecipe && <RecipeDetailWindow recipe={selectedRecipe} onClose={() => setSelectedRecipe(null)} />}
+      {selectedRecipe && (
+        <RecipeDetailWindow recipe={selectedRecipe} onClose={() => setSelectedRecipe(null)} onSave={onSaveRecipe} />
+      )}
     </>
   );
 }
 
-function RecipeDetailWindow({ recipe, onClose }: { recipe: Recipe; onClose: () => void }) {
+function RecipeDetailWindow({ recipe, onClose, onSave }: { recipe: Recipe; onClose: () => void; onSave?: (recipe: Recipe) => void }) {
   const steps = recipe.instructions
     .split(/\r?\n+/)
     .map((step) => step.trim())
@@ -1125,7 +1233,15 @@ function RecipeDetailWindow({ recipe, onClose }: { recipe: Recipe; onClose: () =
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3">
           <p className="text-sm text-slate-500">Use Escape, Close, or Done Cooking to exit this recipe.</p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {onSave && (
+              <button
+                onClick={() => onSave(recipe)}
+                className="h-10 rounded-lg border border-emerald-600 bg-emerald-50 px-4 text-sm font-bold text-emerald-800 hover:bg-emerald-100"
+              >
+                Save to Library
+              </button>
+            )}
             <button onClick={onClose} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-bold text-slate-700 hover:bg-slate-50">
               Close
             </button>
@@ -1136,6 +1252,195 @@ function RecipeDetailWindow({ recipe, onClose }: { recipe: Recipe; onClose: () =
         </div>
       </section>
     </div>
+  );
+}
+
+function LibraryTab({
+  savedRecipes,
+  mode,
+  form,
+  onModeChange,
+  onFormChange,
+  onSave,
+  onRemove,
+}: {
+  savedRecipes: SavedRecipe[];
+  mode: "manual" | "link";
+  form: {
+    name: string;
+    author: string;
+    ingredients: string;
+    instructions: string;
+    link: string;
+    tags: string;
+  };
+  onModeChange: (mode: "manual" | "link") => void;
+  onFormChange: (field: keyof SavedRecipeForm, value: string) => void;
+  onSave: () => void;
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <>
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-2xl font-black tracking-tight">Personal Library</h2>
+            <p className="mt-1 text-sm text-slate-500">Save recipes, jot down ideas, and keep a recreational recipe notebook in one place.</p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => onModeChange("manual")}
+              className={`h-10 rounded-lg px-4 text-sm font-bold ${mode === "manual" ? "bg-slate-950 text-white" : "border border-slate-200 text-slate-700 hover:bg-slate-50"}`}
+            >
+              Manual
+            </button>
+            <button
+              onClick={() => onModeChange("link")}
+              className={`h-10 rounded-lg px-4 text-sm font-bold ${mode === "link" ? "bg-slate-950 text-white" : "border border-slate-200 text-slate-700 hover:bg-slate-50"}`}
+            >
+              From link
+            </button>
+          </div>
+        </div>
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSave();
+          }}
+          className="mt-5 grid gap-5 lg:grid-cols-[1fr_380px]"
+        >
+          <div className="space-y-5 rounded-3xl border border-slate-200 bg-slate-50 p-5 shadow-sm">
+            <div className="h-1 w-16 rounded-full bg-slate-300" />
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-bold text-slate-700">Recipe name</label>
+                <input
+                  value={form.name}
+                  onChange={(event) => onFormChange("name", event.target.value)}
+                  className="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                  placeholder="Ginger Tofu Rice Bowl"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-bold text-slate-700">Author</label>
+                <input
+                  value={form.author}
+                  onChange={(event) => onFormChange("author", event.target.value)}
+                  className="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                  placeholder="bepgraph Demo"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-bold text-slate-700">Ingredients</label>
+                <textarea
+                  value={form.ingredients}
+                  onChange={(event) => onFormChange("ingredients", event.target.value)}
+                  rows={4}
+                  className="mt-2 w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                  placeholder="tofu, rice, ginger, garlic, spinach, soy sauce"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-bold text-slate-700">Recipe steps</label>
+                <textarea
+                  value={form.instructions}
+                  onChange={(event) => onFormChange("instructions", event.target.value)}
+                  rows={5}
+                  className="mt-2 w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                  placeholder="Cook rice. Sear tofu with ginger and garlic. Wilt spinach. Finish with soy sauce and serve over rice."
+                />
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-2">
+                <div>
+                  <label className="text-sm font-bold text-slate-700">Recipe link</label>
+                  <input
+                    value={form.link}
+                    onChange={(event) => onFormChange("link", event.target.value)}
+                    className="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                    placeholder="https://example.com/ginger-tofu-rice-bowl"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-bold text-slate-700">Tags</label>
+                  <input
+                    value={form.tags}
+                    onChange={(event) => onFormChange("tags", event.target.value)}
+                    className="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                    placeholder="tofu, rice, vegan"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="submit"
+                  className="inline-flex h-12 items-center justify-center rounded-2xl bg-slate-950 px-5 text-sm font-black text-white hover:bg-slate-800"
+                >
+                  Save to Library
+                </button>
+                <p className="text-sm text-slate-500">Your saved recipes are stored locally in the current browser profile.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-5">
+            <div className="rounded-3xl bg-white p-5 shadow-sm">
+              <p className="text-sm font-black uppercase tracking-[0.18em] text-slate-500">Recipe notes</p>
+              <p className="mt-3 text-sm leading-6 text-slate-600">Keep your recreational cooking ideas, journal entries, and quick recipe notes together.</p>
+              <div className="mt-4 rounded-3xl border border-slate-200 bg-slate-50 p-4 text-sm tracking-tight text-slate-700">
+                <p className="text-slate-400">• Add ingredients and instructions at the same time, then save the recipe.</p>
+                <p className="mt-2 text-slate-400">• Use tags to group by cuisine, meal type, or mood.</p>
+                <p className="mt-2 text-slate-400">• Switch to link mode if you want to capture a recipe source URL.</p>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm font-black uppercase tracking-[0.18em] text-slate-500">Recent saved recipes</p>
+              <div className="mt-4 space-y-3">
+                {savedRecipes.length ? (
+                  savedRecipes.map((item) => (
+                    <article key={item.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-base font-black">{item.name}</h3>
+                          <p className="mt-1 text-sm text-slate-500">by {item.author}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onRemove(item.id)}
+                          className="text-sm font-bold uppercase tracking-[0.18em] text-rose-600 hover:text-rose-700"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {item.tags.map((tag) => (
+                          <Badge key={`${item.id}-${tag}`} tone="blue">{tag}</Badge>
+                        ))}
+                      </div>
+                      {item.link ? (
+                        <a href={item.link} target="_blank" rel="noreferrer" className="mt-3 inline-flex text-sm font-bold text-emerald-700 hover:text-emerald-900">
+                          View source link
+                        </a>
+                      ) : null}
+                    </article>
+                  ))
+                ) : (
+                  <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-500">
+                    Your recipe notebook is empty. Save a recipe to start building your personal library.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </form>
+      </section>
+    </>
   );
 }
 

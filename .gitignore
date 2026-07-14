@@ -3,3 +3,4 @@ bepflowaidesign/dist/
 bepflowaidesign/.env
 bepflowaidesign/.env.*
 !bepflowaidesign/.env.example
+.rocketride/
