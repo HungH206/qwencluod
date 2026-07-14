@@ -7,6 +7,7 @@ The demo is intentionally narrow: help a user decide whether to eat at a restaur
 ## App Tabs
 
 - Restaurants: shows available restaurant candidates and the Restaurant Agent's data source.
+- My Recipes: allows users to create, view, and save their own personal recipes.
 - Recipes: searches recipes through TheMealDB and falls back to curated demo recipes if the API is unavailable.
 - Chat with Agents: lets the user prompt the orchestrator and watch each agent explain its evidence.
 
