@@ -79,6 +79,7 @@ type Recipe = {
   time: string;
   source: "Demo" | "TheMealDB";
   image: string;
+  ingredients: string[];
   instructions: string;
 };
 
@@ -173,6 +174,7 @@ const demoRecipes: Recipe[] = [
     time: "20 min",
     source: "Demo",
     image: "https://images.unsplash.com/photo-1512058564366-18510be2db19?auto=format&fit=crop&w=900&q=80",
+    ingredients: ["Chicken", "Thai basil", "Garlic", "Chili", "Soy sauce", "Rice"],
     instructions: "Stir-fry chicken with basil, garlic, chili, soy sauce, and rice. Skip cilantro based on memory.",
   },
   {
@@ -182,6 +184,7 @@ const demoRecipes: Recipe[] = [
     time: "22 min",
     source: "Demo",
     image: "https://images.unsplash.com/photo-1519708227418-c8fd9a32b7a2?auto=format&fit=crop&w=900&q=80",
+    ingredients: ["Salmon", "Teriyaki sauce", "Rice", "Spinach"],
     instructions: "Sear salmon, glaze with teriyaki, and serve over rice with spinach.",
   },
   {
@@ -191,6 +194,7 @@ const demoRecipes: Recipe[] = [
     time: "18 min",
     source: "Demo",
     image: "https://images.unsplash.com/photo-1543353071-10c8ba85a904?auto=format&fit=crop&w=900&q=80",
+    ingredients: ["Chicken", "Spinach", "Rice", "Lemon"],
     instructions: "Cook chicken, wilt spinach, and finish with lemon over rice.",
   },
 ];
@@ -401,18 +405,28 @@ async function fetchMealDbRecipes(query: string): Promise<Recipe[]> {
       strArea?: string;
       strMealThumb?: string;
       strInstructions?: string;
+      [key: string]: string | undefined;
     }>;
   };
 
-  return (data.meals ?? []).slice(0, 6).map((meal) => ({
-    id: meal.idMeal,
-    name: meal.strMeal,
-    cuisine: meal.strArea || "Global",
-    time: "20-35 min",
-    source: "TheMealDB",
-    image: meal.strMealThumb || demoRecipes[0].image,
-    instructions: meal.strInstructions || "Recipe details available from TheMealDB.",
-  }));
+  return (data.meals ?? []).slice(0, 6).map((meal) => {
+    const ingredients = Array.from({ length: 20 }, (_, index) => {
+      const ingredient = meal[`strIngredient${index + 1}`]?.trim();
+      const measure = meal[`strMeasure${index + 1}`]?.trim();
+      return ingredient ? [measure, ingredient].filter(Boolean).join(" ") : "";
+    }).filter(Boolean);
+
+    return {
+      id: meal.idMeal,
+      name: meal.strMeal,
+      cuisine: meal.strArea || "Global",
+      time: "20-35 min",
+      source: "TheMealDB",
+      image: meal.strMealThumb || demoRecipes[0].image,
+      ingredients,
+      instructions: meal.strInstructions || "Recipe details available from TheMealDB.",
+    };
+  });
 }
 
 async function fetchGooglePlacesRestaurants(query: string, location: UserLocation | null): Promise<Restaurant[]> {
@@ -635,7 +649,7 @@ function App() {
     const nextRecipe = createSavedRecipe({
       name: recipe.name,
       author: "bepgraph Demo",
-      ingredients: `Cuisine: ${recipe.cuisine}`,
+      ingredients: recipe.ingredients.join("\n"),
       instructions: recipe.instructions,
       link: "",
       tags: [recipe.cuisine],
@@ -1207,6 +1221,21 @@ function RecipeDetailWindow({ recipe, onClose, onSave }: { recipe: Recipe; onClo
             <div className="mt-3">
               <Badge tone={recipe.source === "TheMealDB" ? "green" : "slate"}>{recipe.source}</Badge>
             </div>
+            <div className="mt-5">
+              <h3 className="text-base font-black">Ingredients</h3>
+              {recipe.ingredients.length ? (
+                <ul className="mt-3 space-y-2">
+                  {recipe.ingredients.map((ingredient, index) => (
+                    <li key={`${ingredient}-${index}`} className="flex gap-2 text-sm leading-6 text-slate-700">
+                      <span className="font-black text-emerald-600">•</span>
+                      <span>{ingredient}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-3 text-sm text-slate-500">No ingredients are available for this recipe.</p>
+              )}
+            </div>
           </aside>
 
           <div className="p-5">
@@ -1279,6 +1308,17 @@ function LibraryTab({
   onSave: () => void;
   onRemove: (id: string) => void;
 }) {
+  const [selectedRecipe, setSelectedRecipe] = useState<SavedRecipe | null>(null);
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setSelectedRecipe(null);
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, []);
+
   return (
     <>
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -1428,6 +1468,15 @@ function LibraryTab({
                           View source link
                         </a>
                       ) : null}
+                      <div className="mt-4">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedRecipe(item)}
+                          className="inline-flex h-9 items-center rounded-lg bg-slate-950 px-3 text-xs font-black text-white hover:bg-slate-800"
+                        >
+                          View recipe
+                        </button>
+                      </div>
                     </article>
                   ))
                 ) : (
@@ -1440,7 +1489,92 @@ function LibraryTab({
           </div>
         </form>
       </section>
+      {selectedRecipe && (
+        <SavedRecipeDetailWindow recipe={selectedRecipe} onClose={() => setSelectedRecipe(null)} />
+      )}
     </>
+  );
+}
+
+function SavedRecipeDetailWindow({ recipe, onClose }: { recipe: SavedRecipe; onClose: () => void }) {
+  const ingredients = recipe.ingredients
+    .split(/\r?\n|,/)
+    .map((ingredient) => ingredient.trim())
+    .filter(Boolean);
+  const steps = recipe.instructions
+    .split(/\r?\n+/)
+    .map((step) => step.trim())
+    .filter(Boolean);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <section className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-600">Saved recipe</p>
+            <h2 className="truncate text-xl font-black">{recipe.name}</h2>
+            <p className="truncate text-sm text-slate-500">by {recipe.author}</p>
+          </div>
+          <button type="button" onClick={onClose} className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-900" aria-label="Close recipe">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto md:grid-cols-[320px_1fr]">
+          <aside className="border-b border-slate-200 bg-slate-50 p-5 md:border-b-0 md:border-r">
+            <Badge tone={recipe.source === "Import" ? "green" : "slate"}>{recipe.source}</Badge>
+            <h3 className="mt-5 text-base font-black">Ingredients</h3>
+            {ingredients.length ? (
+              <ul className="mt-3 space-y-2">
+                {ingredients.map((ingredient, index) => (
+                  <li key={`${ingredient}-${index}`} className="flex gap-2 text-sm leading-6 text-slate-700">
+                    <span className="font-black text-emerald-600">•</span>
+                    <span>{ingredient}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm text-slate-500">No ingredients were added.</p>
+            )}
+            {recipe.tags.length ? (
+              <div className="mt-5 flex flex-wrap gap-2">
+                {recipe.tags.map((tag) => <Badge key={tag} tone="blue">{tag}</Badge>)}
+              </div>
+            ) : null}
+          </aside>
+
+          <div className="p-5">
+            <div className="mb-5 rounded-lg border border-emerald-100 bg-emerald-50 p-4">
+              <h3 className="text-sm font-black text-emerald-900">Cook mode</h3>
+              <p className="mt-1 text-sm leading-6 text-emerald-800">Keep this window open while cooking, then press Done Cooking when you finish.</p>
+            </div>
+            <h3 className="text-base font-black">Instructions</h3>
+            <div className="mt-3 space-y-3">
+              {(steps.length ? steps : ["No instructions were added."]).map((step, index) => (
+                <div key={`${step}-${index}`} className="flex gap-3 rounded-lg border border-slate-200 p-3">
+                  <div className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-slate-950 text-xs font-black text-white">{index + 1}</div>
+                  <p className="text-sm leading-6 text-slate-700">{step}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3">
+          <div>
+            {recipe.link ? (
+              <a href={recipe.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-bold text-emerald-700 hover:text-emerald-900">
+                <ExternalLink size={15} /> View source
+              </a>
+            ) : <p className="text-sm text-slate-500">Saved in your personal library.</p>}
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-bold text-slate-700 hover:bg-slate-50">Close</button>
+            <button type="button" onClick={onClose} className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-black text-white hover:bg-emerald-700">Done Cooking</button>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 
