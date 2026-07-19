@@ -10,6 +10,8 @@ import {
   DollarSign,
   ExternalLink,
   Loader2,
+  List,
+  LayoutGrid,
   MapPin,
   MessageSquareText,
   Navigation,
@@ -77,10 +79,11 @@ type Recipe = {
   name: string;
   cuisine: string;
   time: string;
-  source: "Demo" | "TheMealDB";
+  source: "Demo" | "TheMealDB" | "Spoonacular";
   image: string;
   ingredients: string[];
   instructions: string;
+  sourceUrl?: string;
 };
 
 type Agent = {
@@ -312,6 +315,7 @@ function buildAgents(prompt: string, memory: Memory, decision: Decision, restaur
   const context = inferContext(prompt);
   const googleCount = restaurants.filter((item) => item.source === "Google Places").length;
   const mealDbCount = recipes.filter((item) => item.source === "TheMealDB").length;
+  const spoonacularCount = recipes.filter((item) => item.source === "Spoonacular").length;
   return [
     {
       id: "memory",
@@ -337,7 +341,9 @@ function buildAgents(prompt: string, memory: Memory, decision: Decision, restaur
       icon: ChefHat,
       color: "#16a34a",
       confidence: decision.scores.cook,
-      summary: mealDbCount ? `Loaded ${mealDbCount} recipes from TheMealDB.` : "Using fallback recipes while TheMealDB results load.",
+      summary: mealDbCount || spoonacularCount
+        ? `Loaded ${mealDbCount} TheMealDB and ${spoonacularCount} Spoonacular recipes.`
+        : "Using fallback recipes while recipe results load.",
       evidence: recipes.slice(0, 3).map((item) => `${item.name}: ${item.cuisine}, ${item.time}`),
     },
     {
@@ -389,7 +395,7 @@ function rankRecipes(recipes: Recipe[], memory: Memory) {
       ...recipe,
       agentScore:
         (memory.cuisines.includes(recipe.cuisine) ? 18 : 0) +
-        (recipe.source === "TheMealDB" ? 10 : 0) +
+        (recipe.source === "TheMealDB" || recipe.source === "Spoonacular" ? 10 : 0) +
         (recipe.time.includes("20") ? 8 : 0),
     }))
     .sort((a, b) => b.agentScore - a.agentScore);
@@ -405,6 +411,8 @@ async function fetchMealDbRecipes(query: string): Promise<Recipe[]> {
       strArea?: string;
       strMealThumb?: string;
       strInstructions?: string;
+      strSource?: string;
+      strYoutube?: string;
       [key: string]: string | undefined;
     }>;
   };
@@ -425,8 +433,16 @@ async function fetchMealDbRecipes(query: string): Promise<Recipe[]> {
       image: meal.strMealThumb || demoRecipes[0].image,
       ingredients,
       instructions: meal.strInstructions || "Recipe details available from TheMealDB.",
+      sourceUrl: meal.strSource?.trim() || meal.strYoutube?.trim() || `https://www.themealdb.com/meal/${meal.idMeal}`,
     };
   });
+}
+
+async function fetchSpoonacularRecipes(query: string): Promise<Recipe[]> {
+  const response = await fetch(`/api/spoonacular-recipes?q=${encodeURIComponent(query)}`);
+  if (!response.ok) throw new Error("Spoonacular request failed");
+  const data = (await response.json()) as { configured: boolean; recipes: Recipe[] };
+  return data.recipes ?? [];
 }
 
 async function fetchGooglePlacesRestaurants(query: string, location: UserLocation | null): Promise<Restaurant[]> {
@@ -573,14 +589,10 @@ function App() {
 
   async function loadRecipes(query = recipeQuery) {
     setLoadingRecipes(true);
-    try {
-      const liveRecipes = await fetchMealDbRecipes(query);
-      setRecipes(liveRecipes.length ? liveRecipes : demoRecipes);
-    } catch {
-      setRecipes(demoRecipes);
-    } finally {
-      setLoadingRecipes(false);
-    }
+    const results = await Promise.allSettled([fetchMealDbRecipes(query), fetchSpoonacularRecipes(query)]);
+    const liveRecipes = results.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+    setRecipes(liveRecipes.length ? liveRecipes : demoRecipes);
+    setLoadingRecipes(false);
   }
 
   async function loadRestaurants(query = restaurantQuery, locationOverride?: UserLocation | null) {
@@ -651,7 +663,7 @@ function App() {
       author: "bepgraph Demo",
       ingredients: recipe.ingredients.join("\n"),
       instructions: recipe.instructions,
-      link: "",
+      link: recipe.sourceUrl || "",
       tags: [recipe.cuisine],
       source: "Import",
     });
@@ -1116,6 +1128,15 @@ function RecipesTab({
   onSaveRecipe: (recipe: Recipe) => void;
 }) {
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [page, setPage] = useState(1);
+  const recipesPerPage = 6;
+  const pageCount = Math.max(1, Math.ceil(recipes.length / recipesPerPage));
+  const visibleRecipes = recipes.slice((page - 1) * recipesPerPage, page * recipesPerPage);
+
+  useEffect(() => {
+    setPage(1);
+  }, [recipes]);
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -1130,7 +1151,7 @@ function RecipesTab({
     <>
       <SearchHeader
         title="Recipes"
-        subtitle="Recipe Agent uses TheMealDB results, then scores them against memory, time, and available ingredients."
+        subtitle="Recipe Agent merges TheMealDB and Spoonacular results, then scores them against memory, time, and available ingredients."
         query={query}
         loading={loading}
         placeholder="chicken, pasta, curry..."
@@ -1138,18 +1159,32 @@ function RecipesTab({
         onSearch={onSearch}
       />
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-base font-black">Recipe Candidates</h3>
-            <p className="text-sm text-slate-500">TheMealDB powers search; demo fallbacks keep the pitch reliable offline.</p>
+            <p className="text-sm text-slate-500">
+              {recipes.length} recipe {recipes.length === 1 ? "candidate" : "candidates"} found for “{query}”.
+            </p>
           </div>
-          <Badge tone={recipes.some((item) => item.source === "TheMealDB") ? "green" : "amber"}>
-            <ExternalLink size={13} />
-            {recipes.some((item) => item.source === "TheMealDB") ? "TheMealDB live" : "Demo fallback"}
-          </Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-lg border border-slate-200 p-1" aria-label="Recipe view">
+              <button type="button" onClick={() => setViewMode("grid")} className={`flex h-8 items-center gap-2 rounded-md px-3 text-xs font-bold ${viewMode === "grid" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-50"}`} aria-pressed={viewMode === "grid"}>
+                <LayoutGrid size={14} /> Grid
+              </button>
+              <button type="button" onClick={() => setViewMode("list")} className={`flex h-8 items-center gap-2 rounded-md px-3 text-xs font-bold ${viewMode === "list" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-50"}`} aria-pressed={viewMode === "list"}>
+                <List size={14} /> List
+              </button>
+            </div>
+            <Badge tone={recipes.some((item) => item.source !== "Demo") ? "green" : "amber"}>
+              <ExternalLink size={13} />
+              {recipes.some((item) => item.source === "Spoonacular")
+                ? "TheMealDB + Spoonacular live"
+                : recipes.some((item) => item.source === "TheMealDB") ? "TheMealDB live" : "Demo fallback"}
+            </Badge>
+          </div>
         </div>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          {recipes.map((recipe) => (
+        <div className={viewMode === "grid" ? "grid grid-cols-1 gap-4 md:grid-cols-3" : "space-y-3"}>
+          {visibleRecipes.map((recipe) => (
             <article
               key={recipe.id}
               tabIndex={0}
@@ -1161,13 +1196,13 @@ function RecipesTab({
                   setSelectedRecipe(recipe);
                 }
               }}
-              className="overflow-hidden rounded-lg border border-slate-200 transition hover:-translate-y-0.5 hover:cursor-pointer hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className={`overflow-hidden rounded-lg border border-slate-200 transition hover:-translate-y-0.5 hover:cursor-pointer hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500 ${viewMode === "list" ? "grid sm:grid-cols-[180px_1fr]" : ""}`}
             >
-              <div className="h-40 bg-slate-100">
+              <div className={viewMode === "list" ? "h-44 bg-slate-100 sm:h-full" : "h-40 bg-slate-100"}>
                 <img src={recipe.image} alt={recipe.name} className="h-full w-full object-cover" />
               </div>
               <div className="p-4">
-                <Badge tone={recipe.source === "TheMealDB" ? "green" : "slate"}>{recipe.source}</Badge>
+                <Badge tone={recipe.source === "Demo" ? "slate" : "green"}>{recipe.source}</Badge>
                 <h3 className="mt-3 text-base font-black leading-tight">{recipe.name}</h3>
                 <p className="mt-1 text-sm text-slate-500">{recipe.cuisine} · {recipe.time}</p>
                 <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">{recipe.instructions}</p>
@@ -1178,6 +1213,18 @@ function RecipesTab({
             </article>
           ))}
         </div>
+        {pageCount > 1 && (
+          <nav className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4" aria-label="Recipe pages">
+            <p className="text-sm text-slate-500">Page {page} of {pageCount} · showing {(page - 1) * recipesPerPage + 1}–{Math.min(page * recipesPerPage, recipes.length)} of {recipes.length}</p>
+            <div className="flex flex-wrap gap-2">
+              {Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => (
+                <button key={pageNumber} type="button" onClick={() => setPage(pageNumber)} className={`flex h-9 min-w-9 items-center justify-center rounded-lg px-3 text-sm font-black ${page === pageNumber ? "bg-emerald-600 text-white" : "border border-slate-200 text-slate-700 hover:bg-slate-50"}`} aria-current={page === pageNumber ? "page" : undefined}>
+                  {pageNumber}
+                </button>
+              ))}
+            </div>
+          </nav>
+        )}
       </section>
       {selectedRecipe && (
         <RecipeDetailWindow recipe={selectedRecipe} onClose={() => setSelectedRecipe(null)} onSave={onSaveRecipe} />
@@ -1187,6 +1234,7 @@ function RecipesTab({
 }
 
 function RecipeDetailWindow({ recipe, onClose, onSave }: { recipe: Recipe; onClose: () => void; onSave?: (recipe: Recipe) => void }) {
+  const [saved, setSaved] = useState(false);
   const steps = recipe.instructions
     .split(/\r?\n+/)
     .map((step) => step.trim())
@@ -1194,6 +1242,11 @@ function RecipeDetailWindow({ recipe, onClose, onSave }: { recipe: Recipe; onClo
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      {saved && (
+        <div className="fixed right-4 top-4 z-[60] flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-sm font-black text-white shadow-xl" role="status" aria-live="polite">
+          <Check size={17} /> Saved to Library
+        </div>
+      )}
       <section className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <div className="min-w-0">
@@ -1219,7 +1272,7 @@ function RecipeDetailWindow({ recipe, onClose, onSave }: { recipe: Recipe; onClo
               <Metric icon={Clock} label="Time" value={recipe.time} />
             </div>
             <div className="mt-3">
-              <Badge tone={recipe.source === "TheMealDB" ? "green" : "slate"}>{recipe.source}</Badge>
+              <Badge tone={recipe.source === "Demo" ? "slate" : "green"}>{recipe.source}</Badge>
             </div>
             <div className="mt-5">
               <h3 className="text-base font-black">Ingredients</h3>
@@ -1261,14 +1314,24 @@ function RecipeDetailWindow({ recipe, onClose, onSave }: { recipe: Recipe; onClo
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3">
-          <p className="text-sm text-slate-500">Use Escape, Close, or Done Cooking to exit this recipe.</p>
+          {recipe.sourceUrl ? (
+            <a href={recipe.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-bold text-emerald-700 hover:text-emerald-900">
+              <ExternalLink size={15} /> Original recipe
+            </a>
+          ) : (
+            <p className="text-sm text-slate-500">Use Escape, Close, or Done Cooking to exit this recipe.</p>
+          )}
           <div className="flex flex-wrap gap-2">
             {onSave && (
               <button
-                onClick={() => onSave(recipe)}
+                onClick={() => {
+                  onSave(recipe);
+                  setSaved(true);
+                }}
+                disabled={saved}
                 className="h-10 rounded-lg border border-emerald-600 bg-emerald-50 px-4 text-sm font-bold text-emerald-800 hover:bg-emerald-100"
               >
-                Save to Library
+                {saved ? "Saved to Library" : "Save to Library"}
               </button>
             )}
             <button onClick={onClose} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-bold text-slate-700 hover:bg-slate-50">

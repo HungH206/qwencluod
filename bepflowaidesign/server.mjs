@@ -49,9 +49,56 @@ function sendJson(res, status, payload) {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "http://localhost:5173",
     "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   });
   res.end(JSON.stringify(payload));
+}
+
+function stripHtml(value = "") {
+  return value
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
+async function searchSpoonacularRecipes(query) {
+  const apiKey = process.env.SPOONACULAR_API_KEY;
+  if (!apiKey) return { configured: false, recipes: [] };
+
+  const url = new URL("https://api.spoonacular.com/recipes/complexSearch");
+  url.searchParams.set("apiKey", apiKey);
+  url.searchParams.set("query", query);
+  url.searchParams.set("number", "18");
+  url.searchParams.set("addRecipeInformation", "true");
+  url.searchParams.set("fillIngredients", "true");
+
+  const response = await fetch(url);
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data?.message || "Spoonacular request failed");
+  }
+
+  return {
+    configured: true,
+    recipes: (data.results ?? []).map((recipe) => {
+      const analyzedSteps = recipe.analyzedInstructions?.[0]?.steps?.map((step) => step.step).filter(Boolean) ?? [];
+      return {
+        id: `spoonacular-${recipe.id}`,
+        name: recipe.title,
+        cuisine: recipe.cuisines?.[0] || "Global",
+        time: recipe.readyInMinutes ? `${recipe.readyInMinutes} min` : "Time unavailable",
+        source: "Spoonacular",
+        image: recipe.image || "",
+        ingredients: (recipe.extendedIngredients ?? []).map((ingredient) => ingredient.original).filter(Boolean),
+        instructions: analyzedSteps.length ? analyzedSteps.join("\n") : stripHtml(recipe.instructions || recipe.summary || "Recipe instructions unavailable."),
+        sourceUrl: recipe.sourceUrl || recipe.spoonacularSourceUrl || "",
+      };
+    }),
+  };
 }
 
 function localDevelopmentResponse(body) {
@@ -93,7 +140,7 @@ function buildQwenMessages(body) {
         "You are BepFlowAI's Decision Orchestrator. Coordinate Memory, Restaurant, Recipe, Schedule, Budget, and Decision agents. " +
         "Use only the provided JSON context. Do not mention any restaurant, recipe, city, cuisine, address, budget, time, rating, preference, or ingredient unless it appears in the JSON context. " +
         "If the user asks for a city, cuisine, dish, restaurant, or ingredient that is not represented in the candidate data, say it is not available in the current app context and recommend the closest available candidate. " +
-        "Restaurants are Google Places candidates when their source is Google Places. Recipes are TheMealDB candidates when their source is TheMealDB. " +
+        "Restaurants are Google Places candidates when their source is Google Places. Recipes may be TheMealDB or Spoonacular candidates according to their source field. " +
         "For eating out, choose only from restaurants. For cooking, choose only from recipes. Never invent alternatives. " +
         "Prefer the localDecision winner unless the ranked restaurant/recipe data strongly contradicts it. " +
         "Return compact JSON only with keys: answer (string), agentNotes (array of exactly 5 short strings). " +
@@ -141,7 +188,18 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  if (req.method !== "POST" || req.url !== "/api/qwen-chat") {
+  const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+  if (req.method === "GET" && requestUrl.pathname === "/api/spoonacular-recipes") {
+    try {
+      const query = requestUrl.searchParams.get("q")?.trim() || "chicken";
+      sendJson(res, 200, await searchSpoonacularRecipes(query));
+    } catch (error) {
+      sendJson(res, 502, { error: error instanceof Error ? error.message : "Spoonacular request failed" });
+    }
+    return;
+  }
+
+  if (req.method !== "POST" || requestUrl.pathname !== "/api/qwen-chat") {
     sendJson(res, 404, { error: "Not found" });
     return;
   }

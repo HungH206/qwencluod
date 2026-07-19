@@ -29,6 +29,14 @@ TheMealDB works directly from the frontend:
 https://www.themealdb.com/api/json/v1/1/search.php?s=chicken
 ```
 
+Spoonacular runs through the local backend proxy so its key stays out of browser code. Add this to `.env`:
+
+```bash
+SPOONACULAR_API_KEY=your_spoonacular_key_here
+```
+
+The Recipes tab merges Spoonacular results with TheMealDB results. Restart `npm run api` after adding or changing the key.
+
 Google Places is wired behind a Vite environment variable:
 
 ```bash
