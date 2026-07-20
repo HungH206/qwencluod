@@ -33,13 +33,7 @@ The React frontend sends protected requests to the Node.js API hosted as an Alib
 
 ## API Integration
 
-TheMealDB works directly from the frontend:
-
-```ts
-https://www.themealdb.com/api/json/v1/1/search.php?s=chicken
-```
-
-Spoonacular runs through the local backend proxy so its key stays out of browser code. Add this to `.env`:
+TheMealDB works directly from the frontend, while Spoonacular runs through the local backend proxy so its key stays out of browser code. Add this to `.env`:
 
 ```bash
 SPOONACULAR_API_KEY=your_spoonacular_key_here
