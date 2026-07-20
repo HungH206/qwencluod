@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { loadCloudItems, syncCloudItems } from "../lib/cloud-library";
+import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import {
   Activity,
   Brain,
@@ -9,8 +12,10 @@ import {
   ChefHat,
   Clock,
   DollarSign,
+  Database,
   ExternalLink,
   Loader2,
+  LogOut,
   List,
   LayoutGrid,
   MapPin,
@@ -556,6 +561,100 @@ function ScoreBar({ label, value, active }: { label: string; value: number; acti
 }
 
 function App() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [checkingSession, setCheckingSession] = useState(isSupabaseConfigured);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    void supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setCheckingSession(false);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setCheckingSession(false);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  if (!isSupabaseConfigured) return <SupabaseSetup />;
+  if (checkingSession) return <FullPageStatus label="Restoring your session..." />;
+  if (!session) return <SignInPage />;
+
+  return <Dashboard session={session} onSignOut={() => void supabase?.auth.signOut()} />;
+}
+
+function FullPageStatus({ label }: { label: string }) {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-white">
+      <div className="flex items-center gap-3 text-sm font-bold"><Loader2 className="animate-spin text-emerald-400" size={20} />{label}</div>
+    </main>
+  );
+}
+
+function SupabaseSetup() {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6">
+      <section className="w-full max-w-lg rounded-xl border border-slate-700 bg-white p-7 shadow-2xl">
+        <Database className="text-emerald-600" size={32} />
+        <h1 className="mt-5 text-2xl font-black text-slate-950">Connect Supabase</h1>
+        <p className="mt-2 text-sm leading-6 text-slate-600">Add the Supabase project URL and publishable key to run authentication and cloud library storage.</p>
+        <pre className="mt-5 overflow-x-auto rounded-lg bg-slate-950 p-4 text-xs leading-6 text-emerald-300">VITE_SUPABASE_URL=...{"\n"}VITE_SUPABASE_PUBLISHABLE_KEY=...</pre>
+      </section>
+    </main>
+  );
+}
+
+function SignInPage() {
+  const [username, setUsername] = useState("demo");
+  const [password, setPassword] = useState("bepflowdemo");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  async function signIn(event: React.FormEvent) {
+    event.preventDefault();
+    if (!supabase) return;
+    setSubmitting(true);
+    setError("");
+    const email = username.trim().toLowerCase() === "demo" ? "demo@bepflowai.app" : username.trim();
+    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    if (signInError) setError(signInError.message);
+    setSubmitting(false);
+  }
+
+  return (
+    <main className="grid min-h-screen bg-slate-950 lg:grid-cols-2">
+      <section className="flex flex-col justify-center p-8 text-white md:p-14">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500 text-slate-950"><Utensils size={24} /></div>
+        <p className="mt-8 text-sm font-black uppercase tracking-[0.2em] text-emerald-400">BepFlowAI</p>
+        <h1 className="mt-3 max-w-xl text-4xl font-black tracking-tight md:text-5xl">Your food decisions and personal library, everywhere.</h1>
+        <p className="mt-5 max-w-lg text-base leading-7 text-slate-300">Sign in to keep saved recipes and favorite restaurants synchronized securely across deployments and devices.</p>
+      </section>
+      <section className="flex items-center justify-center bg-slate-100 p-6 md:p-10">
+        <form onSubmit={signIn} className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-7 shadow-xl">
+          <h2 className="text-2xl font-black text-slate-950">Sign in</h2>
+          <p className="mt-2 text-sm text-slate-500">Use the prepared demo account to explore the application.</p>
+          <label className="mt-6 block text-sm font-bold text-slate-700">Username</label>
+          <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" className="mt-2 h-12 w-full rounded-lg border border-slate-300 px-4 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
+          <label className="mt-4 block text-sm font-bold text-slate-700">Password</label>
+          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" className="mt-2 h-12 w-full rounded-lg border border-slate-300 px-4 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
+          {error && <p className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
+          <button disabled={submitting} className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 text-sm font-black text-slate-950 hover:bg-emerald-400 disabled:opacity-60">
+            {submitting && <Loader2 className="animate-spin" size={17} />}{submitting ? "Signing in..." : "Sign in to BepFlowAI"}
+          </button>
+          <div className="mt-5 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500"><strong className="text-slate-700">Demo:</strong> username <code>demo</code>, password <code>bepflowdemo</code></div>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+function mergeById<T extends { id: string }>(localItems: T[], cloudItems: T[]) {
+  return Array.from(new Map([...localItems, ...cloudItems].map((item) => [item.id, item])).values());
+}
+
+function Dashboard({ session, onSignOut }: { session: Session; onSignOut: () => void }) {
   const [tab, setTab] = useState<Tab>("chat");
   const [memory, setMemory] = useState<Memory>(() => loadMemory());
   const [savedRecipes, setSavedRecipes] = useState<SavedRecipe[]>(() => loadSavedRecipes());
@@ -585,6 +684,8 @@ function App() {
   const [stars, setStars] = useState(0);
   const [qwenResponse, setQwenResponse] = useState<QwenChatResponse | null>(null);
   const [qwenError, setQwenError] = useState("");
+  const [cloudReady, setCloudReady] = useState(false);
+  const [cloudError, setCloudError] = useState("");
 
   const decision = useMemo(() => buildDecision(submitted, memory, restaurants, recipes), [submitted, memory, restaurants, recipes]);
   const agents = useMemo(() => buildAgents(submitted, memory, decision, restaurants, recipes), [submitted, memory, decision, restaurants, recipes]);
@@ -595,11 +696,30 @@ function App() {
 
   useEffect(() => {
     window.localStorage.setItem("bepflowai-saved-recipes", JSON.stringify(savedRecipes));
-  }, [savedRecipes]);
+    if (cloudReady) void syncCloudItems("recipe", savedRecipes).catch((error) => setCloudError(error.message));
+  }, [savedRecipes, cloudReady]);
 
   useEffect(() => {
     window.localStorage.setItem("bepflowai-saved-restaurants", JSON.stringify(savedRestaurants));
-  }, [savedRestaurants]);
+    if (cloudReady) void syncCloudItems("restaurant", savedRestaurants).catch((error) => setCloudError(error.message));
+  }, [savedRestaurants, cloudReady]);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([loadCloudItems<SavedRecipe>("recipe"), loadCloudItems<SavedRestaurant>("restaurant")])
+      .then(([cloudRecipes, cloudRestaurants]) => {
+        if (!active) return;
+        setSavedRecipes((local) => mergeById(local, cloudRecipes));
+        setSavedRestaurants((local) => mergeById(local, cloudRestaurants));
+        setCloudReady(true);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setCloudError(error.message);
+        setCloudReady(true);
+      });
+    return () => { active = false; };
+  }, [session.user.id]);
 
   useEffect(() => {
     window.localStorage.setItem("bepflowai-inventory", JSON.stringify(inventory));
@@ -819,6 +939,7 @@ function App() {
                 <p className="text-sm text-slate-500">Food decisions powered by restaurant, recipe, and memory agents</p>
               </div>
             </div>
+            <div className="flex flex-wrap items-center gap-2">
             <nav className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
               {[
                 { id: "restaurants", label: "Restaurants", icon: Store },
@@ -841,6 +962,14 @@ function App() {
                 );
               })}
             </nav>
+            <div className={`hidden items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold md:flex ${cloudError ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`} title={cloudError || session.user.email}>
+              {cloudReady ? <Database size={15} /> : <Loader2 className="animate-spin" size={15} />}
+              {cloudError ? "Local fallback" : cloudReady ? "Cloud synced" : "Syncing"}
+            </div>
+            <button type="button" onClick={onSignOut} className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-bold text-slate-600 hover:bg-slate-50 hover:text-slate-950">
+              <LogOut size={16} /> Sign out
+            </button>
+            </div>
           </div>
         </header>
 
