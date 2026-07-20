@@ -4,6 +4,7 @@ import {
   Brain,
   BookOpen,
   CalendarClock,
+  CalendarDays,
   Check,
   ChefHat,
   Clock,
@@ -15,6 +16,8 @@ import {
   MapPin,
   MessageSquareText,
   Navigation,
+  Package,
+  Plus,
   RefreshCcw,
   Search,
   Send,
@@ -22,12 +25,30 @@ import {
   Star,
   Store,
   Target,
+  Trash2,
   Utensils,
   Wallet,
   X,
 } from "lucide-react";
 
-type Tab = "restaurants" | "recipes" | "chat" | "library";
+type Tab = "restaurants" | "recipes" | "inventory" | "planner" | "chat" | "library";
+
+const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const apiUrl = (path: string) => `${API_BASE_URL}${path}`;
+
+type InventoryItem = {
+  id: string;
+  name: string;
+  quantity: string;
+};
+
+type MealPlanEntry = {
+  day: string;
+  recipeId: string;
+  recipeName: string;
+  source: string;
+  ingredients: string[];
+};
 
 type SavedRecipe = {
   id: string;
@@ -39,7 +60,10 @@ type SavedRecipe = {
   tags: string[];
   source: "Manual" | "Link" | "Import";
   savedAt: string;
+  substitutionNotes?: string;
 };
+
+type SavedRestaurant = Restaurant & { savedAt: string };
 
 type SavedRecipeForm = {
   name: string;
@@ -438,67 +462,50 @@ async function fetchMealDbRecipes(query: string): Promise<Recipe[]> {
   });
 }
 
+function loadSavedRestaurants(): SavedRestaurant[] {
+  try {
+    const raw = window.localStorage.getItem("bepflowai-saved-restaurants");
+    return raw ? (JSON.parse(raw) as SavedRestaurant[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadInventory(): InventoryItem[] {
+  try {
+    const raw = window.localStorage.getItem("bepflowai-inventory");
+    return raw ? (JSON.parse(raw) as InventoryItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadMealPlan(): MealPlanEntry[] {
+  try {
+    const raw = window.localStorage.getItem("bepflowai-meal-plan");
+    return raw ? (JSON.parse(raw) as MealPlanEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 async function fetchSpoonacularRecipes(query: string): Promise<Recipe[]> {
-  const response = await fetch(`/api/spoonacular-recipes?q=${encodeURIComponent(query)}`);
+  const response = await fetch(apiUrl(`/api/spoonacular-recipes?q=${encodeURIComponent(query)}`));
   if (!response.ok) throw new Error("Spoonacular request failed");
   const data = (await response.json()) as { configured: boolean; recipes: Recipe[] };
   return data.recipes ?? [];
 }
 
 async function fetchGooglePlacesRestaurants(query: string, location: UserLocation | null): Promise<Restaurant[]> {
-  const key = import.meta.env.VITE_GOOGLE_PLACES_API_KEY as string | undefined;
-  if (!key) return [];
-
-  const requestBody = {
-    textQuery: location ? `${query} restaurants` : `${query} restaurants near San Francisco`,
-    maxResultCount: 6,
-    ...(location
-      ? {
-          locationBias: {
-            circle: {
-              center: {
-                latitude: location.lat,
-                longitude: location.lng,
-              },
-              radius: 5000,
-            },
-          },
-        }
-      : {}),
-  };
-
-  const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": key,
-      "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.rating,places.priceLevel,places.types",
-    },
-    body: JSON.stringify(requestBody),
-  });
-  if (!response.ok) throw new Error("Google Places request failed");
-  const data = (await response.json()) as {
-    places?: Array<{
-      id: string;
-      displayName?: { text?: string };
-      formattedAddress?: string;
-      rating?: number;
-      priceLevel?: string;
-      types?: string[];
-    }>;
-  };
-
-  return (data.places ?? []).map((place, index) => ({
-    id: place.id,
-    name: place.displayName?.text ?? "Restaurant",
-    cuisine: cuisineFromTypes(place.types ?? [], query),
-    rating: place.rating ?? 4.3,
-    price: priceFromGoogleLevel(place.priceLevel),
-    distance: `${(0.7 + index * 0.4).toFixed(1)} mi`,
-    minutes: 8 + index * 3,
-    source: "Google Places",
-    address: place.formattedAddress ?? "San Francisco",
-  }));
+  const params = new URLSearchParams({ q: query });
+  if (location) {
+    params.set("lat", String(location.lat));
+    params.set("lng", String(location.lng));
+  }
+  const response = await fetch(apiUrl(`/api/places-search?${params.toString()}`));
+  const data = (await response.json()) as { configured?: boolean; places?: Restaurant[]; error?: string };
+  if (!response.ok) throw new Error(data.error || "Google Places request failed");
+  return data.places ?? [];
 }
 
 function cuisineFromTypes(types: string[], fallback: string) {
@@ -548,6 +555,9 @@ function App() {
   const [tab, setTab] = useState<Tab>("chat");
   const [memory, setMemory] = useState<Memory>(() => loadMemory());
   const [savedRecipes, setSavedRecipes] = useState<SavedRecipe[]>(() => loadSavedRecipes());
+  const [savedRestaurants, setSavedRestaurants] = useState<SavedRestaurant[]>(() => loadSavedRestaurants());
+  const [inventory, setInventory] = useState<InventoryItem[]>(() => loadInventory());
+  const [mealPlan, setMealPlan] = useState<MealPlanEntry[]>(() => loadMealPlan());
   const [libraryMode, setLibraryMode] = useState<"manual" | "link">("manual");
   const [libraryForm, setLibraryForm] = useState<SavedRecipeForm>({
     name: "",
@@ -584,6 +594,18 @@ function App() {
   }, [savedRecipes]);
 
   useEffect(() => {
+    window.localStorage.setItem("bepflowai-saved-restaurants", JSON.stringify(savedRestaurants));
+  }, [savedRestaurants]);
+
+  useEffect(() => {
+    window.localStorage.setItem("bepflowai-inventory", JSON.stringify(inventory));
+  }, [inventory]);
+
+  useEffect(() => {
+    window.localStorage.setItem("bepflowai-meal-plan", JSON.stringify(mealPlan));
+  }, [mealPlan]);
+
+  useEffect(() => {
     void loadRecipes("chicken");
   }, []);
 
@@ -599,7 +621,7 @@ function App() {
     const searchLocation = locationOverride === undefined ? userLocation : locationOverride;
     setLoadingRestaurants(true);
     try {
-      const liveRestaurants = await fetchGooglePlacesRestaurants(query, searchLocation);
+      const liveRestaurants = await fetchGooglePlacesRestaurants(`${query} restaurants`, searchLocation);
       setRestaurants(liveRestaurants.length ? liveRestaurants : demoRestaurants.filter((item) => item.cuisine === query || query === "All").concat(demoRestaurants.filter((item) => item.cuisine !== query)));
     } catch {
       setRestaurants(demoRestaurants);
@@ -671,6 +693,11 @@ function App() {
     setSavedRecipes((current) => [nextRecipe, ...current]);
   }
 
+  function handleSaveRestaurant(restaurant: Restaurant) {
+    if (savedRestaurants.some((item) => item.id === restaurant.id)) return;
+    setSavedRestaurants((current) => [{ ...restaurant, savedAt: new Date().toISOString() }, ...current]);
+  }
+
   async function runOrchestrator(nextPrompt = prompt) {
     if (!nextPrompt.trim()) return;
     setPrompt(nextPrompt);
@@ -682,25 +709,69 @@ function App() {
     setQwenResponse(null);
 
     try {
-      const nextDecision = buildDecision(nextPrompt, memory, restaurants, recipes);
-      const nextAgents = buildAgents(nextPrompt, memory, nextDecision, restaurants, recipes);
-      const rankedRestaurants = rankRestaurants(restaurants, memory).slice(0, 6);
+      let activeLocation = userLocation;
+      let contextRestaurants = restaurants;
+      const wantsNearbyCafe = /\b(caf[eé]|coffee|espresso|latte)\b/i.test(nextPrompt) && /\b(near|nearest|nearby|closest|around me|work)\b/i.test(nextPrompt);
+      if (wantsNearbyCafe) {
+        if (!activeLocation && navigator.geolocation) {
+          setLocationStatus("Chat is requesting your location for nearby cafés...");
+          activeLocation = await new Promise<UserLocation | null>((resolve) => {
+            navigator.geolocation.getCurrentPosition(
+              (position) => resolve({ lat: position.coords.latitude, lng: position.coords.longitude }),
+              () => resolve(null),
+              { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 },
+            );
+          });
+          if (activeLocation) {
+            setUserLocation(activeLocation);
+            setLocationStatus("Location enabled by Chat with Agents");
+          } else {
+            setLocationStatus("Location unavailable. Café search is using the default area.");
+          }
+        }
+        const cafeResults = await fetchGooglePlacesRestaurants("cafes", activeLocation);
+        contextRestaurants = cafeResults;
+        if (cafeResults.length) {
+          setRestaurants(cafeResults);
+          setRestaurantQuery("Cafe");
+        }
+      }
+
+      const nextDecision = buildDecision(nextPrompt, memory, contextRestaurants, recipes);
+      const nextAgents = buildAgents(nextPrompt, memory, nextDecision, contextRestaurants, recipes);
+      const rankedRestaurants = rankRestaurants(contextRestaurants, memory).slice(0, 6);
       const rankedRecipes = rankRecipes(recipes, memory).slice(0, 6);
-      const response = await fetch("/api/qwen-chat", {
+      const response = await fetch(apiUrl("/api/qwen-chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: nextPrompt,
           userContext: inferContext(nextPrompt),
+          location: activeLocation ? { enabled: true, latitude: activeLocation.lat, longitude: activeLocation.lng } : { enabled: false, fallbackArea: "San Francisco" },
           memory,
+          inventory: inventory.slice(0, 50),
+          mealPlan,
+          library: savedRecipes.slice(0, 20).map((recipe) => ({
+            name: recipe.name,
+            author: recipe.author,
+            ingredients: recipe.ingredients,
+            instructions: recipe.instructions,
+            tags: recipe.tags,
+            source: recipe.source,
+            sourceUrl: recipe.link,
+            savedAt: recipe.savedAt,
+            substitutionNotes: recipe.substitutionNotes || "",
+          })),
+          favoriteRestaurants: savedRestaurants.slice(0, 30),
           restaurants: rankedRestaurants,
           recipes: rankedRecipes,
           decision: nextDecision,
           agents: nextAgents,
           selectionPolicy: {
             restaurantSource: "Google Places candidates when available; demo candidates otherwise",
-            recipeSource: "TheMealDB candidates when available; demo candidates otherwise",
-            instruction: "Choose eating out only from restaurants. Choose cooking only from recipes. If the requested city, cuisine, or dish is not represented, say that clearly.",
+            recipeSource: "TheMealDB and Spoonacular candidates when available; demo candidates otherwise",
+            librarySource: "The user's 20 most recently saved local recipes",
+            instruction: "Answer the user's direct request. For nearby cafés or restaurants, choose only from the freshly retrieved Google Places candidates. For meal-plan questions, summarize the provided mealPlan. Never invent missing places or meals.",
           },
         }),
       });
@@ -748,6 +819,8 @@ function App() {
               {[
                 { id: "restaurants", label: "Restaurants", icon: Store },
                 { id: "recipes", label: "Recipes", icon: ChefHat },
+                { id: "inventory", label: "Inventory", icon: Package },
+                { id: "planner", label: "Meal Planner", icon: CalendarDays },
                 { id: "library", label: "Library", icon: BookOpen },
                 { id: "chat", label: "Chat with Agents", icon: MessageSquareText },
               ].map((item) => {
@@ -779,20 +852,38 @@ function App() {
                 onQuery={setRestaurantQuery}
                 onSearch={loadRestaurants}
                 onUseLocation={useCurrentLocation}
+                onSaveRestaurant={handleSaveRestaurant}
               />
             )}
             {tab === "recipes" && (
               <RecipesTab recipes={recipes} query={recipeQuery} loading={loadingRecipes} onQuery={setRecipeQuery} onSearch={loadRecipes} onSaveRecipe={handleSaveRecipe} />
             )}
+            {tab === "inventory" && (
+              <InventoryTab
+                items={inventory}
+                recipes={recipes}
+                loading={loadingRecipes}
+                onAdd={(name, quantity) => setInventory((current) => [{ id: crypto.randomUUID(), name, quantity }, ...current])}
+                onRemove={(id) => setInventory((current) => current.filter((item) => item.id !== id))}
+                onSearch={loadRecipes}
+                onSaveRecipe={handleSaveRecipe}
+              />
+            )}
+            {tab === "planner" && (
+              <MealPlannerTab inventory={inventory} recipes={recipes} savedRecipes={savedRecipes} plan={mealPlan} loading={loadingRecipes} onSearch={loadRecipes} onPlanChange={setMealPlan} />
+            )}
             {tab === "library" && (
               <LibraryTab
                 savedRecipes={savedRecipes}
+                savedRestaurants={savedRestaurants}
                 mode={libraryMode}
                 form={libraryForm}
                 onModeChange={setLibraryMode}
                 onFormChange={(field, value) => setLibraryForm((current) => ({ ...current, [field]: value }))}
                 onSave={() => handleLibrarySave()}
                 onRemove={(id) => setSavedRecipes((current) => current.filter((item) => item.id !== id))}
+                onUpdateRecipe={(updated) => setSavedRecipes((current) => current.map((item) => item.id === updated.id ? updated : item))}
+                onRemoveRestaurant={(id) => setSavedRestaurants((current) => current.filter((item) => item.id !== id))}
               />
             )}
             {tab === "chat" && (
@@ -805,6 +896,10 @@ function App() {
                 stars={stars}
                 qwenResponse={qwenResponse}
                 qwenError={qwenError}
+                restaurants={restaurants}
+                mealPlan={mealPlan}
+                locationStatus={locationStatus}
+                hasLocation={Boolean(userLocation)}
                 onPrompt={setPrompt}
                 onRun={runOrchestrator}
                 onRate={rate}
@@ -932,6 +1027,7 @@ function RestaurantsTab({
   onQuery,
   onSearch,
   onUseLocation,
+  onSaveRestaurant,
 }: {
   restaurants: Restaurant[];
   query: string;
@@ -941,6 +1037,7 @@ function RestaurantsTab({
   onQuery: (value: string) => void;
   onSearch: (value?: string, locationOverride?: UserLocation | null) => void;
   onUseLocation: () => void;
+  onSaveRestaurant: (restaurant: Restaurant) => void;
 }) {
   const cuisineTypes = Array.from(new Set(restaurants.map((item) => item.cuisine)));
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
@@ -1040,13 +1137,14 @@ function RestaurantsTab({
         </div>
       </section>
       {selectedRestaurant && (
-        <RestaurantMapWindow restaurant={selectedRestaurant} onClose={() => setSelectedRestaurant(null)} />
+        <RestaurantMapWindow restaurant={selectedRestaurant} onClose={() => setSelectedRestaurant(null)} onSave={onSaveRestaurant} />
       )}
     </>
   );
 }
 
-function RestaurantMapWindow({ restaurant, onClose }: { restaurant: Restaurant; onClose: () => void }) {
+function RestaurantMapWindow({ restaurant, onClose, onSave }: { restaurant: Restaurant; onClose: () => void; onSave?: (restaurant: Restaurant) => void }) {
+  const [saved, setSaved] = useState(false);
   const mapQuery = `${restaurant.name}, ${restaurant.address}`;
   const encodedQuery = encodeURIComponent(mapQuery);
   const embedUrl = `https://www.google.com/maps?q=${encodedQuery}&output=embed`;
@@ -1099,6 +1197,16 @@ function RestaurantMapWindow({ restaurant, onClose }: { restaurant: Restaurant; 
               <ExternalLink size={16} />
               Open in Google Maps
             </a>
+            {onSave && (
+              <button
+                type="button"
+                disabled={saved}
+                onClick={() => { onSave(restaurant); setSaved(true); }}
+                className="mt-2 h-11 w-full rounded-lg border border-emerald-600 bg-emerald-50 px-4 text-sm font-black text-emerald-800 disabled:cursor-default"
+              >
+                {saved ? "Saved to Library" : "Save Restaurant"}
+              </button>
+            )}
             <button
               onClick={onClose}
               className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-4 text-sm font-bold text-slate-700 hover:bg-slate-50"
@@ -1109,6 +1217,302 @@ function RestaurantMapWindow({ restaurant, onClose }: { restaurant: Restaurant; 
         </div>
       </section>
     </div>
+  );
+}
+
+function MealPlannerTab({
+  inventory,
+  recipes,
+  savedRecipes,
+  plan,
+  loading,
+  onSearch,
+  onPlanChange,
+}: {
+  inventory: InventoryItem[];
+  recipes: Recipe[];
+  savedRecipes: SavedRecipe[];
+  plan: MealPlanEntry[];
+  loading: boolean;
+  onSearch: (query?: string) => void;
+  onPlanChange: (plan: MealPlanEntry[]) => void;
+}) {
+  const [showConfigurator, setShowConfigurator] = useState(false);
+  const [mealCount, setMealCount] = useState(1);
+  const [selectedRecipeIds, setSelectedRecipeIds] = useState<string[]>([]);
+  const [plannerSearch, setPlannerSearch] = useState("");
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const inventoryNames = inventory.map((item) => item.name.toLowerCase().trim()).filter(Boolean);
+  const candidates = [
+    ...recipes.map((recipe) => ({ id: recipe.id, name: recipe.name, source: recipe.source, ingredients: recipe.ingredients })),
+    ...savedRecipes.map((recipe) => ({ id: `saved-${recipe.id}`, name: recipe.name, source: "Library", ingredients: recipe.ingredients.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean) })),
+  ];
+  const rankedCandidates = candidates
+    .map((recipe) => ({
+      ...recipe,
+      matches: recipe.ingredients.filter((ingredient) => inventoryNames.some((item) => ingredient.toLowerCase().includes(item))).length,
+    }))
+    .sort((a, b) => b.matches - a.matches || a.name.localeCompare(b.name));
+  const groceryList = Array.from(new Set(plan.flatMap((meal) => meal.ingredients).filter((ingredient) => !inventoryNames.some((item) => ingredient.toLowerCase().includes(item)))));
+
+  useEffect(() => {
+    if (showConfigurator) {
+      setSelectedRecipeIds(rankedCandidates.slice(0, mealCount).map((recipe) => recipe.id));
+    }
+  }, [recipes]);
+
+  function openConfigurator() {
+    if (!rankedCandidates.length) return;
+    const nextCount = Math.min(plan.length || 7, rankedCandidates.length, 7);
+    setMealCount(nextCount);
+    setSelectedRecipeIds(rankedCandidates.slice(0, nextCount).map((recipe) => recipe.id));
+    setShowConfigurator(true);
+  }
+
+  function updateMealCount(nextCount: number) {
+    setMealCount(nextCount);
+    setSelectedRecipeIds(rankedCandidates.slice(0, nextCount).map((recipe) => recipe.id));
+  }
+
+  function toggleRecipe(recipeId: string) {
+    setSelectedRecipeIds((current) => current.includes(recipeId)
+      ? current.filter((id) => id !== recipeId)
+      : current.length < mealCount ? [...current, recipeId] : current);
+  }
+
+  function createMealPlan() {
+    const selected = rankedCandidates.filter((recipe) => selectedRecipeIds.includes(recipe.id)).slice(0, mealCount);
+    if (selected.length !== mealCount) return;
+    onPlanChange(selected.map((recipe, index) => {
+      const day = days[index];
+      return { day, recipeId: recipe.id, recipeName: recipe.name, source: recipe.source, ingredients: recipe.ingredients };
+    }));
+    setShowConfigurator(false);
+  }
+
+  function replaceMeal(index: number) {
+    if (!rankedCandidates.length) return;
+    const currentId = plan[index]?.recipeId;
+    const currentIndex = rankedCandidates.findIndex((recipe) => recipe.id === currentId);
+    const recipe = rankedCandidates[(currentIndex + 1 + rankedCandidates.length) % rankedCandidates.length];
+    onPlanChange(plan.map((meal, mealIndex) => mealIndex === index ? { ...meal, recipeId: recipe.id, recipeName: recipe.name, source: recipe.source, ingredients: recipe.ingredients } : meal));
+  }
+
+  return (
+    <>
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2"><CalendarDays size={23} className="text-emerald-600" /><h2 className="text-2xl font-black">Meal Planner Agent</h2></div>
+            <p className="mt-1 text-sm text-slate-500">Build a seven-day plan from live recipes, saved recipes, and your current inventory.</p>
+          </div>
+          <div className="flex gap-2">
+            {plan.length > 0 && <button type="button" onClick={() => onPlanChange([])} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-bold text-slate-700">Clear</button>}
+            <button type="button" onClick={openConfigurator} disabled={!rankedCandidates.length} className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-black text-white disabled:opacity-50"><Sparkles size={16} /> Generate New Plan</button>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-1">
+          {plan.length ? plan.map((meal, index) => (
+            <article key={meal.day} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-slate-950 text-xs font-black text-white">{meal.day.slice(0, 3)}</div>
+                <div><h3 className="font-black">{meal.recipeName}</h3><p className="text-sm text-slate-500">{meal.source} · {meal.ingredients.length} ingredients</p></div>
+              </div>
+              <button type="button" onClick={() => replaceMeal(index)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:border-emerald-300">Replace meal</button>
+            </article>
+          )) : (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">Create a plan after loading recipes or saving recipes to your Library.</div>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-black">Generated Grocery List</h2><p className="mt-1 text-sm text-slate-500">Ingredients needed for the plan that are not matched by your inventory.</p></div><Badge tone={groceryList.length ? "amber" : "green"}>{groceryList.length} missing</Badge></div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          {groceryList.length ? groceryList.map((ingredient) => <div key={ingredient} className="flex items-center gap-2 rounded-lg border border-slate-200 p-3 text-sm text-slate-700"><Plus size={14} className="text-emerald-600" />{ingredient}</div>) : <p className="sm:col-span-2 rounded-lg bg-emerald-50 p-4 text-sm text-emerald-800">{plan.length ? "Your inventory covers the current plan." : "Create a meal plan to generate its grocery list."}</p>}
+        </div>
+      </section>
+      {showConfigurator && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="meal-plan-title">
+          <section className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+              <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-600">Meal Planner Agent</p><h2 id="meal-plan-title" className="text-xl font-black">Choose recipes for your plan</h2></div>
+              <button type="button" onClick={() => setShowConfigurator(false)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-500" aria-label="Close meal planner"><X size={18} /></button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+              <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-4">
+                <label htmlFor="meal-count" className="text-sm font-black text-emerald-900">How many recipes do you want to make?</label>
+                <select id="meal-count" value={mealCount} onChange={(event) => updateMealCount(Number(event.target.value))} className="ml-3 h-10 rounded-lg border border-emerald-200 bg-white px-3 text-sm font-bold">
+                  {Array.from({ length: Math.min(7, rankedCandidates.length) }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count}</option>)}
+                </select>
+                <p className="mt-2 text-sm text-emerald-800">Select exactly {mealCount}. The shopping list will combine their ingredients and remove items already in inventory.</p>
+              </div>
+              <form
+                className="mt-4 flex gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (plannerSearch.trim()) onSearch(plannerSearch.trim());
+                }}
+              >
+                <div className="relative min-w-0 flex-1">
+                  <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input value={plannerSearch} onChange={(event) => setPlannerSearch(event.target.value)} placeholder="Search for chicken, ramen, tacos..." className="h-11 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm outline-none focus:border-emerald-500" />
+                </div>
+                <button type="submit" disabled={loading || !plannerSearch.trim()} className="inline-flex h-11 items-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-black text-white disabled:opacity-50">{loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />} Search</button>
+              </form>
+              <p className="mt-2 text-xs text-slate-500">Click a result to select or deselect it. New searches replace the live provider candidates but keep Library recipes available.</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                {rankedCandidates.slice(0, 20).map((recipe) => {
+                  const selected = selectedRecipeIds.includes(recipe.id);
+                  const coverage = recipe.ingredients.length ? Math.round((recipe.matches / recipe.ingredients.length) * 100) : 0;
+                  return (
+                    <button key={recipe.id} type="button" onClick={() => toggleRecipe(recipe.id)} className={`text-left rounded-lg border p-4 transition ${selected ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-100" : "border-slate-200 hover:border-emerald-300"}`} aria-pressed={selected}>
+                      <div className="flex items-start justify-between gap-3"><div><h3 className="font-black">{recipe.name}</h3><p className="mt-1 text-sm text-slate-500">{recipe.source} · {recipe.ingredients.length} ingredients</p></div><div className={`flex h-6 w-6 flex-none items-center justify-center rounded-md border ${selected ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300"}`}>{selected && <Check size={14} />}</div></div>
+                      <p className="mt-3 text-xs font-bold text-emerald-700">{coverage}% covered by inventory</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-4">
+              <p className="text-sm text-slate-500">{selectedRecipeIds.length} of {mealCount} selected</p>
+              <div className="flex gap-2"><button type="button" onClick={() => setShowConfigurator(false)} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-bold">Cancel</button><button type="button" onClick={createMealPlan} disabled={selectedRecipeIds.length !== mealCount} className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-black text-white disabled:opacity-50">Add to Planner</button></div>
+            </div>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}
+
+function InventoryTab({
+  items,
+  recipes,
+  loading,
+  onAdd,
+  onRemove,
+  onSearch,
+  onSaveRecipe,
+}: {
+  items: InventoryItem[];
+  recipes: Recipe[];
+  loading: boolean;
+  onAdd: (name: string, quantity: string) => void;
+  onRemove: (id: string) => void;
+  onSearch: (query?: string) => void;
+  onSaveRecipe: (recipe: Recipe) => void;
+}) {
+  const [name, setName] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [recipeSearch, setRecipeSearch] = useState("");
+  const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
+  const inventoryNames = items.map((item) => item.name.trim().toLowerCase()).filter(Boolean);
+  const rankedRecommendations = recipes
+    .map((recipe) => {
+      const matched = recipe.ingredients.filter((ingredient) => inventoryNames.some((item) => ingredient.toLowerCase().includes(item)));
+      const missing = recipe.ingredients.filter((ingredient) => !inventoryNames.some((item) => ingredient.toLowerCase().includes(item)));
+      const coverage = recipe.ingredients.length ? Math.round((matched.length / recipe.ingredients.length) * 100) : 0;
+      return { recipe, matched, missing, coverage };
+    })
+    .sort((a, b) => b.coverage - a.coverage || b.matched.length - a.matched.length);
+  const preferredRecommendations = [
+    ...rankedRecommendations.filter(({ recipe }) => recipe.source === "Spoonacular").slice(0, 3),
+    ...rankedRecommendations.filter(({ recipe }) => recipe.source === "TheMealDB").slice(0, 3),
+  ];
+  const preferredIds = new Set(preferredRecommendations.map(({ recipe }) => recipe.id));
+  const recommendations = [
+    ...preferredRecommendations.sort((a, b) => b.coverage - a.coverage || b.matched.length - a.matched.length),
+    ...rankedRecommendations.filter(({ recipe }) => !preferredIds.has(recipe.id)),
+  ]
+    .slice(0, 6);
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setSelectedRecipe(null);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, []);
+
+  return (
+    <>
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <Package className="text-emerald-600" size={22} />
+              <h2 className="text-2xl font-black tracking-tight">Inventory Agent</h2>
+            </div>
+            <p className="mt-1 text-sm text-slate-500">Track what you have, retrieve recipes, and rank them by ingredient coverage.</p>
+          </div>
+          <Badge tone={items.length ? "green" : "amber"}>{items.length} pantry {items.length === 1 ? "item" : "items"}</Badge>
+        </div>
+
+        <form
+          className="mt-5 grid gap-3 sm:grid-cols-[1fr_180px_auto]"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!name.trim()) return;
+            onAdd(name.trim(), quantity.trim() || "1 item");
+            setName("");
+            setQuantity("");
+          }}
+        >
+          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ingredient, e.g. chicken" className="h-11 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
+          <input value={quantity} onChange={(event) => setQuantity(event.target.value)} placeholder="Quantity, e.g. 2 lb" className="h-11 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
+          <button type="submit" className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-black text-white hover:bg-slate-800"><Plus size={16} /> Add item</button>
+        </form>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {items.length ? items.map((item) => (
+            <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-black capitalize">{item.name}</p>
+                <p className="truncate text-xs text-slate-500">{item.quantity}</p>
+              </div>
+              <button type="button" onClick={() => onRemove(item.id)} className="flex h-8 w-8 flex-none items-center justify-center rounded-md text-rose-600 hover:bg-rose-50" aria-label={`Remove ${item.name}`}><Trash2 size={15} /></button>
+            </div>
+          )) : (
+            <div className="sm:col-span-2 lg:col-span-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-500">Add pantry or refrigerator items to start matching recipes.</div>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-black">Inventory Recommendations</h3>
+            <p className="text-sm text-slate-500">Search TheMealDB and Spoonacular, then let the Inventory Agent rank the retrieved recipes.</p>
+          </div>
+          <form className="flex w-full max-w-md gap-2" onSubmit={(event) => { event.preventDefault(); onSearch(recipeSearch.trim() || items[0]?.name || "quick dinner"); }}>
+            <input value={recipeSearch} onChange={(event) => setRecipeSearch(event.target.value)} placeholder={items[0] ? `Try ${items[0].name}` : "Search recipes"} className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-emerald-500" />
+            <button type="submit" disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-black text-white disabled:opacity-60">{loading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} Find recipes</button>
+          </form>
+        </div>
+
+        <div className="mt-5 space-y-3">
+          {recommendations.map(({ recipe, matched, missing, coverage }) => (
+            <article key={recipe.id} className="grid overflow-hidden rounded-lg border border-slate-200 sm:grid-cols-[150px_1fr]">
+              <img src={recipe.image} alt={recipe.name} className="h-40 w-full object-cover sm:h-full" />
+              <div className="p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <Badge tone={coverage >= 50 ? "green" : coverage ? "blue" : "slate"}>{coverage}% inventory match</Badge>
+                    <h4 className="mt-2 text-base font-black">{recipe.name}</h4>
+                    <p className="text-sm text-slate-500">{recipe.cuisine} · {recipe.time} · {recipe.source}</p>
+                  </div>
+                  <button type="button" onClick={() => setSelectedRecipe(recipe)} className="h-9 rounded-lg bg-slate-950 px-3 text-xs font-black text-white">View recipe</button>
+                </div>
+                <p className="mt-3 text-sm text-emerald-700"><strong>Have:</strong> {matched.length ? matched.slice(0, 4).join(", ") : "No ingredient matches yet"}</p>
+                <p className="mt-1 text-sm text-slate-500"><strong>Still need:</strong> {missing.length ? missing.slice(0, 4).join(", ") : "Nothing — ready to cook"}{missing.length > 4 ? ` +${missing.length - 4} more` : ""}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      {selectedRecipe && <RecipeDetailWindow recipe={selectedRecipe} onClose={() => setSelectedRecipe(null)} onSave={onSaveRecipe} />}
+    </>
   );
 }
 
@@ -1349,14 +1753,18 @@ function RecipeDetailWindow({ recipe, onClose, onSave }: { recipe: Recipe; onClo
 
 function LibraryTab({
   savedRecipes,
+  savedRestaurants,
   mode,
   form,
   onModeChange,
   onFormChange,
   onSave,
   onRemove,
+  onUpdateRecipe,
+  onRemoveRestaurant,
 }: {
   savedRecipes: SavedRecipe[];
+  savedRestaurants: SavedRestaurant[];
   mode: "manual" | "link";
   form: {
     name: string;
@@ -1370,8 +1778,11 @@ function LibraryTab({
   onFormChange: (field: keyof SavedRecipeForm, value: string) => void;
   onSave: () => void;
   onRemove: (id: string) => void;
+  onUpdateRecipe: (recipe: SavedRecipe) => void;
+  onRemoveRestaurant: (id: string) => void;
 }) {
   const [selectedRecipe, setSelectedRecipe] = useState<SavedRecipe | null>(null);
+  const [selectedRestaurant, setSelectedRestaurant] = useState<SavedRestaurant | null>(null);
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -1552,14 +1963,46 @@ function LibraryTab({
           </div>
         </form>
       </section>
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div>
+          <h2 className="text-xl font-black">Favorite Restaurants</h2>
+          <p className="mt-1 text-sm text-slate-500">Keep favorite places and reopen their location details whenever you need them.</p>
+        </div>
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          {savedRestaurants.length ? savedRestaurants.map((restaurant) => (
+            <article key={restaurant.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-black">{restaurant.name}</h3>
+                  <p className="mt-1 text-sm text-slate-500">{restaurant.cuisine} · {restaurant.address}</p>
+                </div>
+                <Badge tone={restaurant.source === "Google Places" ? "green" : "slate"}>{restaurant.source}</Badge>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button type="button" onClick={() => setSelectedRestaurant(restaurant)} className="h-9 rounded-lg bg-slate-950 px-3 text-xs font-black text-white">View place</button>
+                <button type="button" onClick={() => onRemoveRestaurant(restaurant.id)} className="h-9 rounded-lg border border-rose-200 px-3 text-xs font-bold text-rose-700 hover:bg-rose-50">Remove</button>
+              </div>
+            </article>
+          )) : (
+            <div className="md:col-span-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-500">Open a restaurant from the Restaurants tab and choose Save Restaurant to build your favorites.</div>
+          )}
+        </div>
+      </section>
       {selectedRecipe && (
-        <SavedRecipeDetailWindow recipe={selectedRecipe} onClose={() => setSelectedRecipe(null)} />
+        <SavedRecipeDetailWindow
+          recipe={selectedRecipe}
+          onClose={() => setSelectedRecipe(null)}
+          onUpdate={(updated) => { onUpdateRecipe(updated); setSelectedRecipe(updated); }}
+        />
       )}
+      {selectedRestaurant && <RestaurantMapWindow restaurant={selectedRestaurant} onClose={() => setSelectedRestaurant(null)} />}
     </>
   );
 }
 
-function SavedRecipeDetailWindow({ recipe, onClose }: { recipe: SavedRecipe; onClose: () => void }) {
+function SavedRecipeDetailWindow({ recipe, onClose, onUpdate }: { recipe: SavedRecipe; onClose: () => void; onUpdate: (recipe: SavedRecipe) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(recipe);
   const ingredients = recipe.ingredients
     .split(/\r?\n|,/)
     .map((ingredient) => ingredient.trim())
@@ -1575,8 +2018,8 @@ function SavedRecipeDetailWindow({ recipe, onClose }: { recipe: SavedRecipe; onC
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <div className="min-w-0">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-600">Saved recipe</p>
-            <h2 className="truncate text-xl font-black">{recipe.name}</h2>
-            <p className="truncate text-sm text-slate-500">by {recipe.author}</p>
+            <h2 className="truncate text-xl font-black">{draft.name}</h2>
+            <p className="truncate text-sm text-slate-500">by {draft.author}</p>
           </div>
           <button type="button" onClick={onClose} className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-900" aria-label="Close recipe">
             <X size={18} />
@@ -1587,7 +2030,9 @@ function SavedRecipeDetailWindow({ recipe, onClose }: { recipe: SavedRecipe; onC
           <aside className="border-b border-slate-200 bg-slate-50 p-5 md:border-b-0 md:border-r">
             <Badge tone={recipe.source === "Import" ? "green" : "slate"}>{recipe.source}</Badge>
             <h3 className="mt-5 text-base font-black">Ingredients</h3>
-            {ingredients.length ? (
+            {editing ? (
+              <textarea value={draft.ingredients} onChange={(event) => setDraft((current) => ({ ...current, ingredients: event.target.value }))} rows={12} className="mt-3 w-full rounded-lg border border-slate-200 bg-white p-3 text-sm outline-none focus:border-emerald-500" />
+            ) : ingredients.length ? (
               <ul className="mt-3 space-y-2">
                 {ingredients.map((ingredient, index) => (
                   <li key={`${ingredient}-${index}`} className="flex gap-2 text-sm leading-6 text-slate-700">
@@ -1611,14 +2056,32 @@ function SavedRecipeDetailWindow({ recipe, onClose }: { recipe: SavedRecipe; onC
               <h3 className="text-sm font-black text-emerald-900">Cook mode</h3>
               <p className="mt-1 text-sm leading-6 text-emerald-800">Keep this window open while cooking, then press Done Cooking when you finish.</p>
             </div>
+            {editing && (
+              <div className="mb-5 grid gap-3 sm:grid-cols-2">
+                <div><label className="text-sm font-bold">Recipe name</label><input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} className="mt-2 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-emerald-500" /></div>
+                <div><label className="text-sm font-bold">Author</label><input value={draft.author} onChange={(event) => setDraft((current) => ({ ...current, author: event.target.value }))} className="mt-2 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-emerald-500" /></div>
+              </div>
+            )}
             <h3 className="text-base font-black">Instructions</h3>
-            <div className="mt-3 space-y-3">
-              {(steps.length ? steps : ["No instructions were added."]).map((step, index) => (
-                <div key={`${step}-${index}`} className="flex gap-3 rounded-lg border border-slate-200 p-3">
-                  <div className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-slate-950 text-xs font-black text-white">{index + 1}</div>
-                  <p className="text-sm leading-6 text-slate-700">{step}</p>
-                </div>
-              ))}
+            {editing ? (
+              <textarea value={draft.instructions} onChange={(event) => setDraft((current) => ({ ...current, instructions: event.target.value }))} rows={10} className="mt-3 w-full rounded-lg border border-slate-200 p-3 text-sm leading-6 outline-none focus:border-emerald-500" />
+            ) : (
+              <div className="mt-3 space-y-3">
+                {(steps.length ? steps : ["No instructions were added."]).map((step, index) => (
+                  <div key={`${step}-${index}`} className="flex gap-3 rounded-lg border border-slate-200 p-3">
+                    <div className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-slate-950 text-xs font-black text-white">{index + 1}</div>
+                    <p className="text-sm leading-6 text-slate-700">{step}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <h3 className="text-sm font-black text-amber-900">Substitution notes</h3>
+              {editing ? (
+                <textarea value={draft.substitutionNotes || ""} onChange={(event) => setDraft((current) => ({ ...current, substitutionNotes: event.target.value }))} rows={4} placeholder="Example: Replace dairy milk with oat milk; use sunflower seed butter for a nut-free version." className="mt-2 w-full rounded-lg border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500" />
+              ) : (
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-amber-900">{recipe.substitutionNotes || "No substitution notes yet. Choose Edit Recipe to add options for dietary needs or available ingredients."}</p>
+              )}
             </div>
           </div>
         </div>
@@ -1632,6 +2095,14 @@ function SavedRecipeDetailWindow({ recipe, onClose }: { recipe: SavedRecipe; onC
             ) : <p className="text-sm text-slate-500">Saved in your personal library.</p>}
           </div>
           <div className="flex gap-2">
+            {editing ? (
+              <>
+                <button type="button" onClick={() => { setDraft(recipe); setEditing(false); }} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-bold text-slate-700">Cancel</button>
+                <button type="button" onClick={() => { onUpdate(draft); setEditing(false); }} className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-black text-white">Save Changes</button>
+              </>
+            ) : (
+              <button type="button" onClick={() => setEditing(true)} className="h-10 rounded-lg border border-emerald-600 bg-emerald-50 px-4 text-sm font-bold text-emerald-800">Edit Recipe</button>
+            )}
             <button type="button" onClick={onClose} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-bold text-slate-700 hover:bg-slate-50">Close</button>
             <button type="button" onClick={onClose} className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-black text-white hover:bg-emerald-700">Done Cooking</button>
           </div>
@@ -1650,6 +2121,10 @@ function ChatTab({
   stars,
   qwenResponse,
   qwenError,
+  restaurants,
+  mealPlan,
+  locationStatus,
+  hasLocation,
   onPrompt,
   onRun,
   onRate,
@@ -1662,41 +2137,57 @@ function ChatTab({
   stars: number;
   qwenResponse: QwenChatResponse | null;
   qwenError: string;
+  restaurants: Restaurant[];
+  mealPlan: MealPlanEntry[];
+  locationStatus: string;
+  hasLocation: boolean;
   onPrompt: (value: string) => void;
   onRun: (value?: string) => void;
   onRate: (score: number) => void;
 }) {
+  const directContextRequest = /\b(caf[eé]|coffee|meal plan|planned meals|nearest|nearby)\b/i.test(submitted);
   return (
     <>
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="bg-slate-950 px-5 py-5 text-white">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-2xl font-black tracking-tight">Chat with Agents</h2>
-            <p className="mt-1 text-sm text-slate-500">One prompt goes to the orchestrator, then each specialized agent reports evidence.</p>
+            <p className="mt-1 text-sm text-slate-300">Ask for nearby places, inspect your meal plan, or coordinate a food decision.</p>
           </div>
           <button
             onClick={() => onRun(prompts[(prompts.indexOf(submitted) + 1) % prompts.length])}
-            className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-700 px-3 text-sm font-bold text-slate-200 hover:bg-slate-800"
           >
             <RefreshCcw size={15} />
             Scenario
           </button>
         </div>
-        <div className="mt-4 flex gap-2">
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button type="button" onClick={() => { onPrompt("Find the nearest café where I can work and get a drink."); }} className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-200 hover:border-emerald-400">Nearby café</button>
+          <button type="button" onClick={() => { onPrompt("What meals are currently in my meal plan?"); }} className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-200 hover:border-emerald-400">Check my meal plan</button>
+        </div>
+        <div className="mt-3 flex gap-2">
           <div className="relative flex-1">
-            <MessageSquareText className="absolute left-3 top-3 text-slate-400" size={18} />
+            <MessageSquareText className="absolute left-3 top-3 text-slate-500" size={18} />
             <input
               value={prompt}
               onChange={(event) => onPrompt(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && onRun()}
-              className="h-12 w-full rounded-lg border border-slate-200 bg-slate-50 pl-10 pr-3 text-sm outline-none ring-emerald-500 focus:bg-white focus:ring-2"
-              placeholder="Tell BepFlowAI about your day..."
+              className="h-12 w-full rounded-lg border border-slate-700 bg-white pl-10 pr-3 text-sm text-slate-950 outline-none ring-emerald-500 focus:ring-2"
+              placeholder="Ask for a nearby café or check your saved meal plan..."
             />
           </div>
-          <button onClick={() => onRun()} className="inline-flex h-12 items-center gap-2 rounded-lg bg-slate-950 px-5 text-sm font-black text-white hover:bg-slate-800">
+          <button onClick={() => onRun()} className="inline-flex h-12 items-center gap-2 rounded-lg bg-emerald-500 px-5 text-sm font-black text-slate-950 hover:bg-emerald-400">
             <Send size={16} />
             Run
           </button>
+        </div>
+        </div>
+        <div className="grid gap-3 p-4 md:grid-cols-3">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3"><div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-500"><Navigation size={14} />Location</div><p className="mt-2 text-sm font-bold text-slate-800">{hasLocation ? "Enabled for nearby searches" : "Requested when a nearby search runs"}</p><p className="mt-1 text-xs text-slate-500">{locationStatus}</p></div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3"><div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-500"><Store size={14} />Places context</div><p className="mt-2 text-sm font-bold text-slate-800">{restaurants.filter((item) => item.source === "Google Places").length} live candidates</p><p className="mt-1 text-xs text-slate-500">Chat refreshes this list for café requests.</p></div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3"><div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-500"><CalendarDays size={14} />Meal plan</div><p className="mt-2 text-sm font-bold text-slate-800">{mealPlan.length ? `${mealPlan.length} planned meals` : "No plan saved"}</p><p className="mt-1 truncate text-xs text-slate-500">{mealPlan.length ? mealPlan.map((meal) => meal.recipeName).join(", ") : "Generate one in Meal Planner."}</p></div>
         </div>
       </section>
 
@@ -1712,7 +2203,7 @@ function ChatTab({
           </Badge>
         </div>
         <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-          {running && <p className="text-sm leading-6 text-slate-600">Qwen is coordinating the Memory, Restaurant, Recipe, Schedule, Budget, and Decision agents...</p>}
+          {running && <p className="text-sm leading-6 text-slate-600">Qwen is coordinating live Places, Meal Planner, Inventory, Memory, Recipe, Budget, and Decision context...</p>}
           {!running && qwenResponse && (
             <div>
               <p className="text-sm leading-6 text-slate-800">{qwenResponse.answer}</p>
@@ -1735,7 +2226,7 @@ function ChatTab({
         </div>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      {!directContextRequest && <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="rounded-lg bg-slate-950 p-5 text-white">
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone="green"><Target size={13} />Final recommendation</Badge>
@@ -1749,7 +2240,7 @@ function ChatTab({
             <ScoreBar label="Meal prep" value={decision.scores.prep} active={decision.winner === "prep"} />
           </div>
         </div>
-      </section>
+      </section>}
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {agents.map((agent, index) => (
