@@ -4,7 +4,14 @@ import { join } from "node:path";
 import { mealPlannerTools, runMealPlannerTool } from "./meal-planner-tools.mjs";
 
 const PORT = Number(process.env.FC_CUSTOM_LISTEN_PORT || process.env.PORT || process.env.API_PORT || 8787);
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || "http://localhost:5173";
+const ALLOWED_ORIGINS = new Set([
+  "http://localhost:5173",
+  "https://qwencluod.vercel.app",
+  ...(process.env.FRONTEND_ORIGINS || process.env.FRONTEND_ORIGIN || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+]);
 const DASH_SCOPE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions";
 const spoonacularCache = new Map();
 const SPOONACULAR_CACHE_MS = 30 * 60 * 1000;
@@ -48,12 +55,19 @@ function readJson(req) {
   });
 }
 
+function setCorsHeaders(req, res) {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+}
+
 function sendJson(res, status, payload) {
   res.writeHead(status, {
     "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": FRONTEND_ORIGIN,
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   });
   res.end(JSON.stringify(payload));
 }
@@ -261,6 +275,8 @@ function normalizeAgentNotes(notes) {
 }
 
 const server = createServer(async (req, res) => {
+  setCorsHeaders(req, res);
+
   if (req.method === "OPTIONS") {
     sendJson(res, 204, {});
     return;
