@@ -1,6 +1,6 @@
 # BepFlowAI
 
-BepFlowAI is a hackathon-focused multi-agent food decision dashboard.
+BepFlowAI is a multi-agent food decision dashboard.
 
 The demo is intentionally narrow: help a user decide whether to eat at a restaurant, cook a recipe, or meal prep based on schedule, memory, cuisine preferences, budget, and available options.
 
