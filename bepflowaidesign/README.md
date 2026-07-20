@@ -4,12 +4,22 @@ BepFlowAI is a hackathon-focused multi-agent food decision dashboard.
 
 The demo is intentionally narrow: help a user decide whether to eat at a restaurant, cook a recipe, or meal prep based on schedule, memory, cuisine preferences, budget, and available options.
 
+## Architecture
+
+[![BepFlowAI system architecture](./docs/bepflowai-architecture.png)](./docs/bepflowai-architecture.png)
+
+[Download the architecture diagram (PNG)](./docs/bepflowai-architecture.png) · [View or download the editable source (SVG)](./docs/bepflowai-architecture.svg)
+
+The React frontend sends protected requests to the Node.js API hosted as an Alibaba Cloud Function Compute Web Function. Function Compute keeps provider credentials server-side, invokes Qwen through Alibaba Cloud Model Studio, and retrieves Google Places and Spoonacular data. TheMealDB's public API is called directly by the frontend. User preferences, inventory, saved recipes, restaurants, and meal plans are currently persisted in browser `localStorage`; an external database is not required for this prototype.
+
 ## App Tabs
 
-- Restaurants: shows available restaurant candidates and the Restaurant Agent's data source.
-- My Recipes: allows users to create, view, and save their own personal recipes.
-- Recipes: searches recipes through TheMealDB and falls back to curated demo recipes if the API is unavailable.
-- Chat with Agents: lets the user prompt the orchestrator and watch each agent explain its evidence.
+- Restaurants: finds nearby restaurants and cafés through Google Places.
+- Recipes: searches and combines recipes from TheMealDB and Spoonacular.
+- Inventory: tracks grocery items and recommends recipes using available ingredients.
+- Meal Planner: creates custom plans and extracts ingredients into a shopping list.
+- Library: stores recipes, substitution notes, and favorite restaurants.
+- Chat with Agents: lets the user prompt the Qwen orchestrator and review agent evidence.
 
 ## Agent System
 
@@ -37,19 +47,13 @@ SPOONACULAR_API_KEY=your_spoonacular_key_here
 
 The Recipes tab merges Spoonacular results with TheMealDB results. Restart `npm run api` after adding or changing the key.
 
-Google Places is wired behind a Vite environment variable:
+Google Places runs through the backend proxy so its key stays out of browser code. Set:
 
 ```bash
-cp .env.example .env
+GOOGLE_PLACES_API_KEY=your_key_here
 ```
 
-Then set:
-
-```bash
-VITE_GOOGLE_PLACES_API_KEY=your_key_here
-```
-
-For a production deployment, move Google Places calls behind a backend endpoint so the API key is not exposed in browser code.
+For Alibaba Cloud deployment, add this and the other API keys as Function Compute environment variables rather than uploading `.env`.
 
 Qwen chat runs through the local backend proxy in `server.mjs`, so `DASHSCOPE_API_KEY` stays out of browser code.
 

@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">BepFlowAI system architecture</title>
+  <desc id="desc">Architecture showing the React frontend, browser storage, Alibaba Cloud Function Compute backend, Qwen Cloud, meal planning tools, and external food data providers.</desc>
+  <defs>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#081226"/><stop offset="1" stop-color="#172554"/></linearGradient>
+    <linearGradient id="cloud" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff7ed"/><stop offset="1" stop-color="#eff6ff"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="7" stdDeviation="8" flood-color="#0f172a" flood-opacity=".10"/></filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#2563eb"/></marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#059669"/></marker>
+    <style>
+      .title{font:700 35px Arial,sans-serif;fill:#fff}.subtitle{font:16px Arial,sans-serif;fill:#bfdbfe}
+      .section{font:700 16px Arial,sans-serif;letter-spacing:1.5px;fill:#475569}.h{font:700 22px Arial,sans-serif;fill:#0f172a}.b{font:15px Arial,sans-serif;fill:#475569}.small{font:13px Arial,sans-serif;fill:#64748b}.pill{font:700 12px Arial,sans-serif;fill:#1e40af}.white{fill:#fff}.line{fill:none;stroke:#2563eb;stroke-width:3;marker-end:url(#arrow)}.green{fill:none;stroke:#059669;stroke-width:3;marker-end:url(#arrowGreen)}.dash{stroke-dasharray:8 7}
+    </style>
+  </defs>
+  <rect width="1600" height="1000" fill="#f8fafc"/>
+  <rect width="1600" height="105" fill="url(#header)"/>
+  <circle cx="62" cy="52" r="27" fill="#10b981"/><text x="62" y="61" text-anchor="middle" font-family="Arial" font-size="25" font-weight="700" fill="#fff">B</text>
+  <text x="105" y="47" class="title">BepFlowAI System Architecture</text>
+  <text x="106" y="76" class="subtitle">Food decisions powered by live recipe, restaurant, inventory, meal-planning, and Qwen agents</text>
+
+  <text x="55" y="145" class="section">USER &amp; BROWSER</text>
+  <g filter="url(#shadow)"><rect x="55" y="170" rx="18" width="210" height="135" class="white"/><circle cx="100" cy="219" r="23" fill="#dbeafe"/><circle cx="100" cy="211" r="8" fill="#2563eb"/><path d="M84 240c3-13 29-13 32 0" fill="#2563eb"/><text x="137" y="214" class="h">User</text><text x="137" y="241" class="b">Web browser</text><text x="75" y="280" class="small">Search • save • plan • chat</text></g>
+
+  <g filter="url(#shadow)"><rect x="335" y="160" rx="20" width="515" height="245" class="white"/><rect x="335" y="160" rx="20" width="515" height="58" fill="#eff6ff"/><circle cx="375" cy="189" r="17" fill="#2563eb"/><text x="375" y="195" text-anchor="middle" font-family="Arial" font-size="16" font-weight="700" fill="#fff">R</text><text x="408" y="197" class="h">React + Vite Frontend</text><text x="368" y="250" class="b">Restaurants  •  Recipes  •  Inventory</text><text x="368" y="281" class="b">Meal Planner  •  Library  •  Chat with Agents</text><rect x="368" y="313" rx="14" width="198" height="30" fill="#dbeafe"/><text x="467" y="333" text-anchor="middle" class="pill">Interactive client interface</text><text x="368" y="375" class="small">HTTPS / JSON requests and grounded agent responses</text></g>
+
+  <g filter="url(#shadow)"><rect x="335" y="470" rx="20" width="515" height="185" class="white"/><rect x="335" y="470" rx="20" width="12" height="185" fill="#10b981"/><text x="375" y="514" class="h">Browser Persistence</text><text x="375" y="544" class="b">localStorage (current prototype data store)</text><text x="375" y="580" class="small">Preferences &amp; memory • Grocery inventory • Saved recipes</text><text x="375" y="608" class="small">Substitution notes • Favorite restaurants • Active meal plan</text><rect x="375" y="623" rx="12" width="155" height="25" fill="#d1fae5"/><text x="452" y="640" text-anchor="middle" font-family="Arial" font-size="12" font-weight="700" fill="#047857">No external DB yet</text></g>
+
+  <rect x="925" y="135" rx="26" width="620" height="535" fill="url(#cloud)" stroke="#f97316" stroke-width="3" stroke-dasharray="10 8"/>
+  <text x="965" y="176" class="section" fill="#c2410c">ALIBABA CLOUD</text>
+  <g filter="url(#shadow)"><rect x="970" y="200" rx="20" width="530" height="215" class="white"/><rect x="970" y="200" rx="20" width="14" height="215" fill="#f97316"/><text x="1015" y="243" class="h">Function Compute — Web Function</text><text x="1015" y="272" class="b">Node.js backend API • secrets kept server-side</text><text x="1015" y="309" class="small">POST  /api/qwen-chat</text><text x="1015" y="334" class="small">GET   /api/places-search</text><text x="1250" y="334" class="small">GET   /api/spoonacular-recipes</text><text x="1015" y="359" class="small">GET   /api/meal-planner/tools</text><text x="1250" y="359" class="small">POST  /api/meal-planner/tools/call</text><rect x="1015" y="376" rx="12" width="170" height="25" fill="#ffedd5"/><text x="1100" y="393" text-anchor="middle" font-family="Arial" font-size="12" font-weight="700" fill="#c2410c">Port 9000 • fcapp.run</text></g>
+
+  <g filter="url(#shadow)"><rect x="970" y="455" rx="18" width="240" height="165" class="white"/><circle cx="1010" cy="494" r="18" fill="#d1fae5"/><text x="1010" y="500" text-anchor="middle" font-family="Arial" font-size="15" font-weight="700" fill="#047857">M</text><text x="1040" y="500" class="h" font-size="19">Meal Planner Tools</text><text x="995" y="538" class="small">Create plan • search recipes</text><text x="995" y="563" class="small">Extract ingredients</text><text x="995" y="588" class="small">Build shopping list</text></g>
+  <g filter="url(#shadow)"><rect x="1260" y="455" rx="18" width="240" height="165" class="white"/><circle cx="1300" cy="494" r="18" fill="#dbeafe"/><text x="1300" y="500" text-anchor="middle" font-family="Arial" font-size="15" font-weight="700" fill="#1d4ed8">Q</text><text x="1330" y="500" class="h" font-size="19">Qwen Cloud</text><text x="1285" y="538" class="small">Alibaba Model Studio</text><text x="1285" y="563" class="small">Decision orchestration</text><text x="1285" y="588" class="small">Grounded natural-language answer</text></g>
+
+  <text x="55" y="735" class="section">LIVE FOOD DATA PROVIDERS</text>
+  <g filter="url(#shadow)"><rect x="55" y="760" rx="18" width="350" height="145" class="white"/><rect x="55" y="760" rx="18" width="9" height="145" fill="#4285f4"/><text x="88" y="804" class="h">Google Places API</text><text x="88" y="838" class="b">Nearby restaurants and cafés</text><text x="88" y="868" class="small">Location • distance • rating • source link</text></g>
+  <g filter="url(#shadow)"><rect x="455" y="760" rx="18" width="350" height="145" class="white"/><rect x="455" y="760" rx="18" width="9" height="145" fill="#10b981"/><text x="488" y="804" class="h">TheMealDB API</text><text x="488" y="838" class="b">Free recipe search and details</text><text x="488" y="868" class="small">Ingredients • instructions • source link</text></g>
+  <g filter="url(#shadow)"><rect x="855" y="760" rx="18" width="350" height="145" class="white"/><rect x="855" y="760" rx="18" width="9" height="145" fill="#ef4444"/><text x="888" y="804" class="h">Spoonacular API</text><text x="888" y="838" class="b">Expanded recipe catalog</text><text x="888" y="868" class="small">Search • nutrition • ingredients • source</text></g>
+  <g filter="url(#shadow)"><rect x="1255" y="760" rx="18" width="290" height="145" fill="#0f172a"/><text x="1288" y="804" font-family="Arial" font-size="20" font-weight="700" fill="#fff">Grounded Result</text><text x="1288" y="838" font-family="Arial" font-size="14" fill="#cbd5e1">Ranked recommendations</text><text x="1288" y="866" font-family="Arial" font-size="14" fill="#cbd5e1">Evidence + user context</text></g>
+
+  <path d="M265 235H325" class="line"/><text x="278" y="221" class="small">1  request</text>
+  <path d="M590 405V460" class="green"/><text x="606" y="440" class="small">2  load/save context</text>
+  <path d="M850 270H960" class="line"/><text x="870" y="252" class="small">3  secure API</text>
+  <path d="M1210 510H1250" class="line"/><text x="1216" y="492" class="small">tools</text>
+  <path d="M1365 415V445" class="line"/>
+  <path d="M1090 415V445" class="green"/>
+  <path d="M1085 620V705H230V750" class="line dash"/><text x="640" y="696" class="small">backend provider requests</text>
+  <path d="M1150 620V720H1030V750" class="line dash"/>
+  <path d="M590 655V750" class="green dash"/><text x="606" y="710" class="small">direct public API</text>
+  <path d="M1500 307H1565V935H1400V915" class="green dash"/><text x="1460" y="949" text-anchor="end" class="small">4  recommendation returned to UI</text>
+
+  <text x="55" y="968" class="small">BepFlowAI • Current hackathon deployment architecture • API credentials are configured as Function Compute environment variables</text>
+</svg>
