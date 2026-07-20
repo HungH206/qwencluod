@@ -4,6 +4,9 @@ BepFlowAI is a multi-agent food decision dashboard.
 
 The demo is intentionally narrow: help a user decide whether to eat at a restaurant, cook a recipe, or meal prep based on schedule, memory, cuisine preferences, budget, and available options.
 
+## Backend Link for implementation:
+https://fc.console.alibabacloud.com/us-west-1/functions/bepflowapi?tab=detail&section=code
+
 ## Architecture
 
 [![BepFlowAI system architecture](./docs/bepflowai-architecture.png)](./docs/bepflowai-architecture.png)
