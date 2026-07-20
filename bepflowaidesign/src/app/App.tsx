@@ -33,7 +33,11 @@ import {
 
 type Tab = "restaurants" | "recipes" | "inventory" | "planner" | "chat" | "library";
 
-const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+// Production requests stay on the Vercel origin and are forwarded by
+// vercel.json. This avoids browser CORS enforcement against Function Compute.
+const API_BASE_URL = import.meta.env.PROD
+  ? ""
+  : String(import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const apiUrl = (path: string) => `${API_BASE_URL}${path}`;
 
 type InventoryItem = {

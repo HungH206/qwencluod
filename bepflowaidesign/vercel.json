@@ -5,6 +5,10 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "destination": "https://bepflowapi-fvmyrsedve.us-west-1.fcapp.run/api/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
